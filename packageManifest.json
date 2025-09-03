@@ -1,0 +1,41 @@
+{
+  "packageName": "LG ThinQ Connect Integration",
+  "author": "Ionut Turturica",
+  "version": "1.0.0",
+  "minimumHEVersion": "2.2.9",
+  "dateReleased": "2025-09-02",
+  "apps": [
+    {
+      "id": "5ba769b6-f5c4-4065-88dd-d86a0a46a421",
+      "name": "ThinQ Connect Integration",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/apps/thinq_connect_core.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false
+    }
+  ],
+  "drivers": [
+    {
+      "id": "b736791a-8f6a-4c88-a0a6-87102c2c1700",
+      "name": "ThinQ Connect Washer",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_washer.groovy",
+      "required": true
+    },
+    {
+      "id": "1445a1b8-6839-470f-8da3-852e7635e14c",
+      "name": "ThinQ Connect Dryer",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_dryer.groovy",
+      "required": true
+    },
+    {
+      "id": "b6994602-7708-4a14-b99f-e2e4267cd017",
+      "name": "ThinQ Connect Dishwasher",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_dishwasher.groovy",
+      "required": true
+    }
+  ]
+}
