@@ -255,7 +255,7 @@ def initialize() {
         
         def childDevice = getChildDevice("thinqconnect:${deviceDetails.id}")
         if (childDevice == null) {
-            childDevice = addChildDevice("thinq.connect", driverName, "thinqconnect:${deviceDetails.id}", 1234, 
+            childDevice = addChildDevice("jonozzz", driverName, "thinqconnect:${deviceDetails.id}", 1234, 
                 ["name": deviceDetails.name, isComponent: false])
             
             // Set the first device as master for MQTT
