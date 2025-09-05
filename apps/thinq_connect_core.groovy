@@ -405,7 +405,7 @@ def registerPushNotifications() {
     
     for (deviceId in selectedDevices) {
         try {
-            apiPost("/push/${deviceId}/subscribe", [:])
+            //apiPost("/push/${deviceId}/subscribe", [:])
             apiPost("/event/${deviceId}/subscribe", [expire: [unit: "HOUR", timer: 4464]])
         } catch (Exception e) {
             logger("warn", "Failed to register notifications for device ${deviceId}: ${e}")
