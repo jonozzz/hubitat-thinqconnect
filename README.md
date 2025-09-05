@@ -32,9 +32,18 @@ This is a new Hubitat integration for LG ThinQ devices using the official LG Thi
 
 ### 3. Obtain MQTT Certificates
 
-You need two files:
-- **Client Certificate Request**: CSR generated based on csrconfig.txt
-- **Private Key**: Corresponding private key
+You need two files, which can be generated locally using `openssl` or online via a service like https://csrgenerator.com/
+
+- **Private Key**: RSA private key in PEM format  
+  Example:  
+  ```bash
+  openssl genpkey -outform PEM -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out priv.key
+  ```
+- **Client Certificate Request**: Corresponding CSR based on csrconfig.txt  
+  Example:
+	```bash
+  openssl req -new -nodes -key priv.key -config csrconfig.txt -out cert.csr
+  ```
 
 These can be generated once and reused. The certificates are used for secure MQTT communication.
 
@@ -66,12 +75,12 @@ Not currently implemented but can be added upon request:
 
 ### Washer
 - **Attributes**: Current state, remaining time, total time, operation mode, cycle count, etc.
-- **Commands**: Start, stop, set delay start
+- **Commands**: Toggle, Power Off, Set delay start
 - **Capabilities**: Switch, Sensor, Contact Sensor (for door), Refresh
 
 ### Dryer
 - **Attributes**: Current state, remaining time, dry level, temperature level, etc.
-- **Commands**: Start, stop, set delay start
+- **Commands**: Toggle, Power Off, Set delay start
 - **Capabilities**: Switch, Sensor, Refresh
 
 ## API Endpoints
@@ -109,8 +118,7 @@ The integration uses these official ThinQ Connect API endpoints:
 
 ### Step 3: MQTT Configuration
 - MQTT server automatically detected from API
-- Enter CA certificate
-- Enter client certificate
+- Enter client certificate request
 - Enter private key
 - Register MQTT client
 
@@ -154,9 +162,10 @@ The integration processes data from the ThinQ Connect API in this format:
 3. Ensure your devices are registered with LG ThinQ
 
 ### MQTT Issues
-1. Verify certificate format (PEM)
+1. Verify CSR format (PEM)
 2. Check that certificates are not expired
 3. Ensure MQTT server URL is correct
+4. The LG API throttles client‑certificate issuance. In practice, requesting no more than one certificate per minute is reliable.
 
 ### Device Not Found
 1. Check that device type is supported

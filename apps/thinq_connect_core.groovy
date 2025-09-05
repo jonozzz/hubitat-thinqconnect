@@ -12,6 +12,7 @@
 import groovy.transform.Field
 import java.text.SimpleDateFormat
 import groovy.json.JsonSlurper
+import java.security.MessageDigest
 
 @Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
 @Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[2]
@@ -31,6 +32,7 @@ preferences {
     page(name: "prefMain")
     page(name: "prefAuth")
     page(name: "prefMqtt")
+    page(name: "prefMQTTClient")
     page(name: "prefDevices")
 }
 
@@ -130,7 +132,7 @@ def prefAuth() {
 }
 
 def prefMqtt() {
-    return dynamicPage(name: "prefMqtt", title: "MQTT Configuration", nextPage: "prefDevices", uninstall: false, install: false) {
+    return dynamicPage(name: "prefMqtt", title: "MQTT Configuration", nextPage: "prefMQTTClient", uninstall: false, install: false) {
         section("MQTT Server") {
             if (patToken && countryCode) {
                 def routeResult = getMqttServerFromApi()
@@ -146,15 +148,19 @@ def prefMqtt() {
         }
         
         section("Certificate Generation") {
-            paragraph "The integration will automatically generate certificates using LG's API. You only need to provide a CSR (Certificate Signing Request)."
+            paragraph "The integration will automatically issue a certificate using LG's API. You only need to provide a CSR (Certificate Signing Request)."
             input "csrData", "textarea", title: "CSR (Certificate Signing Request)", required: true,
-                description: "Paste your CSR in PEM format (without headers/footers, just the base64 data)"
-            // input "caCertificate", "textarea", title: "CA Certificate (PEM format)", required: true
+                description: "Paste your CSR in PEM format"
             input "privateKey", "textarea", title: "Private Key (PEM format)", required: true
         }
-        
-        section("MQTT Setup") {
-            if(!state.clientCertificate || !state.mqttSubscriptions)
+    }
+}
+
+def prefMQTTClient() {
+    def pk_sig = calculateMD5(csrData + privateKey)
+    return dynamicPage(name: "prefMQTTClient", title: "MQTT Client Registration", nextPage: "prefDevices", uninstall: false, install: false) {
+        section {
+            if(!state.clientCertificate || !state.mqttSubscriptions || state.pk_sig != pk_sig)
                 if (patToken && countryCode && state.mqttServer && csrData) {
                     def mqttResult = setupMqttClient()
                     if (mqttResult.success) {
@@ -162,7 +168,9 @@ def prefMqtt() {
                         paragraph "📋 Subscriptions: ${mqttResult.subscriptions?.join(', ')}"
                         state.mqttSubscriptions = mqttResult.subscriptions
                         state.clientCertificate = mqttResult.certificate
+                        state.pk_sig = pk_sig
                     } else {
+                        // paragraph "Try again in 1-2 minutes"
                         paragraph "❌ MQTT setup failed: ${mqttResult.error}"
                     }
                 } else {
@@ -572,4 +580,10 @@ private logger(level, msg) {
             log."${level}" "${app.name} ${msg}"
         }
     }
+}
+
+def calculateMD5(String input) {
+    MessageDigest md = MessageDigest.getInstance("MD5")
+    byte[] digest = md.digest(input.bytes)
+    digest.collect { String.format("%02x", it) }.join()
 }

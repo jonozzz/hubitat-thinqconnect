@@ -1,9 +1,9 @@
 {
   "packageName": "LG ThinQ Connect Integration",
   "author": "Ionut Turturica",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minimumHEVersion": "2.2.9",
-  "dateReleased": "2025-09-02",
+  "dateReleased": "2025-09-05",
   "apps": [
     {
       "id": "5ba769b6-f5c4-4065-88dd-d86a0a46a421",
