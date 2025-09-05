@@ -41,8 +41,8 @@ metadata {
         attribute "relativeMinuteToStop", "number"
         
         // Commands
-        command "start"
-        command "stop"
+        command "toggle"
+        command "powerOff"
         command "setDelayStart", ["number"]
     }
 
@@ -142,7 +142,6 @@ def mqttClientStatus(String message) {
 
 def processStateData(data) {
     logger("debug", "processStateData(${data})")
-    //data = data[0]
 
     if (!data) return
 
@@ -151,7 +150,7 @@ def processStateData(data) {
         def currentState = data.runState.currentState
         sendEvent(name: "currentState", value: currentState)
         
-        def switchState = (currentState =~ /(?i)power_off|standby/ ? 'off' : 'on')
+        def switchState = (currentState =~ /(?i)power_off|pause/ ? 'off' : 'on')
         sendEvent(name: "switch", value: switchState)
         
         if (logDescText) {
@@ -245,19 +244,8 @@ def processStateData(data) {
     }
 }
 
-def start() {
-    logger("debug", "start()")
-    def deviceId = getDeviceId()
-    def command = [
-        operation: [
-            dryerOperationMode: "START"
-        ]
-    ]
-    parent.sendDeviceCommand(deviceId, command)
-}
-
-def stop() {
-    logger("debug", "stop()")
+def toggle() {
+    logger("debug", "toggle()")
     def deviceId = getDeviceId()
     def command = [
         operation: [
@@ -267,12 +255,23 @@ def stop() {
     parent.sendDeviceCommand(deviceId, command)
 }
 
+def powerOff() {
+    logger("debug", "powerOff()")
+    def deviceId = getDeviceId()
+    def command = [
+        operation: [
+            dryerOperationMode: "POWER_OFF"
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
+
 def on() {
-    start()
+    toggle()
 }
 
 def off() {
-    stop()
+    toggle()
 }
 
 def setDelayStart(hours) {
