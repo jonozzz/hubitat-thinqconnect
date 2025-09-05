@@ -7,7 +7,11 @@
       "name": "LG ThinQ Connect Integration",
       "category": "Integrations",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/packageManifest.json",
-      "description": "This is a new Hubitat integration for LG ThinQ devices using the official LG ThinQ Connect API with PAT (Personal Access Token) authentication."
+      "description": "This is a new Hubitat integration for LG ThinQ devices using the official LG ThinQ Connect API with PAT (Personal Access Token) authentication.",
+      "tags": [
+        "Cloud",
+        "Appliances"
+      ]
     }
   ]
 }
