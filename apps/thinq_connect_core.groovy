@@ -40,8 +40,9 @@ preferences {
     "DEVICE_WASHER",
     "DEVICE_DRYER", 
     "DEVICE_DISH_WASHER",
-    //"DEVICE_REFRIGERATOR",
-    //"DEVICE_OVEN",
+    "DEVICE_REFRIGERATOR",
+    "DEVICE_OVEN",
+    "DEVICE_COOKTOP",
     "DEVICE_WASHTOWER_WASHER",
     "DEVICE_WASHTOWER_DRYER"
 ]
@@ -298,6 +299,8 @@ def getDriverName(deviceType) {
             return "ThinQ Connect Refrigerator"
         case "DEVICE_OVEN":
             return "ThinQ Connect Oven"
+        case "DEVICE_COOKTOP":
+            return "ThinQ Connect Cooktop"
         default:
             return null
     }

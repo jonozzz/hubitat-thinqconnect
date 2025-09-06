@@ -1,7 +1,7 @@
 {
   "packageName": "LG ThinQ Connect Integration",
   "author": "Ionut Turturica",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "minimumHEVersion": "2.2.9",
   "dateReleased": "2025-09-05",
   "apps": [
@@ -35,6 +35,27 @@
       "name": "ThinQ Connect Dishwasher",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_dishwasher.groovy",
+      "required": true
+    },
+    {
+      "id": "4ca78989-511c-4f1d-ba39-910814fd3339",
+      "name": "ThinQ Connect Cooktop",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_cooktop.groovy",
+      "required": true
+    },
+    {
+      "id": "c6626634-4630-418b-b082-ab76f99ede11",
+      "name": "ThinQ Connect Oven",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_oven.groovy",
+      "required": true
+    },
+    {
+      "id": "82ebb55f-4cb3-44ba-9999-fa498cb24a42",
+      "name": "ThinQ Connect Refrigerator",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_refrigerator.groovy",
       "required": true
     }
   ]
