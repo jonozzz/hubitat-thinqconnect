@@ -41,6 +41,7 @@ metadata {
         attribute "relativeMinuteToStop", "number"
         
         // Commands
+        command "start"
         command "toggle"
         command "powerOff"
         command "setDelayStart", ["number"]
@@ -83,7 +84,6 @@ def initialize() {
 
 def refresh() {
     logger("debug", "refresh()")
-    // parent.getDeviceStatus(getDeviceDetails(), device)
     def status = parent.getDeviceState(getDeviceId())
 	processStateData(status)
 }
@@ -244,6 +244,17 @@ def processStateData(data) {
     }
 }
 
+def start() {
+    logger("debug", "start()")
+    def deviceId = getDeviceId()
+    def command = [
+        operation: [
+            dryerOperationMode: "START"
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
+
 def toggle() {
     logger("debug", "toggle()")
     def deviceId = getDeviceId()
@@ -267,7 +278,7 @@ def powerOff() {
 }
 
 def on() {
-    toggle()
+    start()
 }
 
 def off() {

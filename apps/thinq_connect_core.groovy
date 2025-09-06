@@ -79,7 +79,6 @@ def prefMain() {
         state.client_id = "thinq-open-" + (UUID.randomUUID().toString().replaceAll(/-/,""))
 
     if (state.caCert == null) {
-        app.removeSetting("caCertificate")
         httpGet([
             uri: caCertUrl,
             textParser: true,
@@ -484,8 +483,9 @@ def apiPost(endpoint, body) {
             }
         }
         return result
-    } catch (Exception e) {
-        logger("error", "API POST exception: ${e}")
+    } catch (groovyx.net.http.HttpResponseException e) {
+        def resp = e.response
+        logger("error", "API POST exception: (${resp.status}) ${resp.data}")
         return null
     }
 }

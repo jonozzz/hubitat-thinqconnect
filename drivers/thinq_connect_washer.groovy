@@ -41,10 +41,10 @@ metadata {
         attribute "relativeMinuteToStop", "number"
         
         // Commands
-        command "toggle"
+        command "start"
+        command "stop"
         command "powerOff"
         command "setDelayStart", ["number"]
-        // command "processStateData", ["object"]
     }
 
     preferences {
@@ -244,10 +244,27 @@ def processStateData(data) {
     }
 }
 
-def toggle() {
-    logger("debug", "toggle()")
+def start() {
+    logger("debug", "start()")
     def deviceId = getDeviceId()
     def command = [
+        location: [
+            locationName: "MAIN"
+        ],
+        operation: [
+            washerOperationMode: "START"
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
+
+def stop() {
+    logger("debug", "stop()")
+    def deviceId = getDeviceId()
+    def command = [
+        location: [
+            locationName: "MAIN"
+        ],
         operation: [
             washerOperationMode: "STOP"
         ]
@@ -259,6 +276,9 @@ def powerOff() {
     logger("debug", "powerOff()")
     def deviceId = getDeviceId()
     def command = [
+        location: [
+            locationName: "MAIN"
+        ],
         operation: [
             washerOperationMode: "POWER_OFF"
         ]
@@ -267,11 +287,11 @@ def powerOff() {
 }
 
 def on() {
-    toggle()
+    start()
 }
 
 def off() {
-    toggle()
+    stop()
 }
 
 def setDelayStart(hours) {

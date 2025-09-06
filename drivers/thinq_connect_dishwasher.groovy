@@ -51,6 +51,7 @@ metadata {
         // Commands
         command "start"
         command "stop"
+        command "powerOff"
         command "setDelayStart", ["number"]
     }
 
@@ -301,6 +302,17 @@ def stop() {
     def command = [
         operation: [
             dishWasherOperationMode: "STOP"
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
+
+def powerOff() {
+    logger("debug", "powerOff()")
+    def deviceId = getDeviceId()
+    def command = [
+        operation: [
+            dishWasherOperationMode: "POWER_OFF"
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
