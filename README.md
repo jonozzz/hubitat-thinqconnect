@@ -64,6 +64,7 @@ Currently supported device types:
 - Dryers (`DEVICE_DRYER`)
 - Dishwashers (`DEVICE_DISH_WASHER`)
 - WashTower units (`DEVICE_WASHTOWER_WASHER`, `DEVICE_WASHTOWER_DRYER`)
+- Microwaves (`DEVICE_MICROWAVE_OVEN`)
 
 ## Unsupported Devices
 
