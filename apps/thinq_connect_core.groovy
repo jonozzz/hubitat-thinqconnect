@@ -359,10 +359,19 @@ def setupMqttClient() {
         // Note: Client registration returns null/empty on success
         logger("debug", "Client registration result: ${clientResult}")
         
+        // Ensure csrData has proper PEM headers
+        def formattedCsrData = csrData
+        if (csrData && !csrData.contains("-----BEGIN CERTIFICATE REQUEST-----")) {
+            // Remove any existing whitespace/newlines
+            def csrContent = csrData.trim()
+            // Add PEM headers
+            formattedCsrData = "-----BEGIN CERTIFICATE REQUEST-----\n" + csrContent + "\n-----END CERTIFICATE REQUEST-----"
+        }
+        
         // Step 2: Issue certificate with CSR to get certificate and subscriptions
         def certBody = [
             "service-code": "SVC202",
-            "csr": csrData
+            "csr": formattedCsrData
         ]
         
         def certResult = apiPost("/client/certificate", certBody)?.result
@@ -541,11 +550,20 @@ def cleanupChildDevices() {
 def retrieveMqttDetails() {
     logger("debug", "retrieveMqttDetails()")
     
+    // Ensure privateKey has proper PEM headers
+    def formattedPrivateKey = privateKey
+    if (privateKey && !privateKey.contains("-----BEGIN PRIVATE KEY-----")) {
+        // Remove any existing whitespace/newlines
+        def keyContent = privateKey.trim()
+        // Add PEM headers
+        formattedPrivateKey = "-----BEGIN PRIVATE KEY-----\n" + keyContent + "\n-----END PRIVATE KEY-----"
+    }
+    
     return [
         server: state.mqttServer,
         subscriptions: state.mqttSubscriptions ?: [],
         certificate: state.clientCertificate,
-        privateKey: privateKey,
+        privateKey: formattedPrivateKey,
         caCertificate: state.caCert,
         clientId: state.client_id
     ]

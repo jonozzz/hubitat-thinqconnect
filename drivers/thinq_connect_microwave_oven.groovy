@@ -225,6 +225,9 @@ def setFanSpeed(speed) {
     def command = [
         ventilation: [
             fanSpeed: speed
+        ],
+        lamp: [
+            lampBrightness: device.currentValue("lampBrightness")
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
@@ -234,6 +237,9 @@ def setLampBrightness(brightness) {
     logger("debug", "setLampBrightness(${brightness})")
     def deviceId = getDeviceId()
     def command = [
+        ventilation: [
+            fanSpeed: device.currentValue("fanSpeed")
+        ],
         lamp: [
             lampBrightness: brightness
         ]
