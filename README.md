@@ -68,9 +68,9 @@ Currently supported device types:
 
 ## Unsupported Devices
 
-Not currently implemented but can be added upon request:
+Currently implemented but untestested:
 - Refrigerators (`DEVICE_REFRIGERATOR`)
-- Ovens (`DEVICE_OVEN`)
+- Ovens (`DEVICE_OVEN`, `DEVICE_COOKTOP`)
 
 ## Device Capabilities
 

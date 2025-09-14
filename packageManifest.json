@@ -1,7 +1,7 @@
 {
   "packageName": "LG ThinQ Connect Integration",
   "author": "Ionut Turturica",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "minimumHEVersion": "2.2.9",
   "dateReleased": "2025-09-05",
   "apps": [
@@ -21,42 +21,49 @@
       "name": "ThinQ Connect Washer",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_washer.groovy",
-      "required": true
+      "required": false
     },
     {
       "id": "1445a1b8-6839-470f-8da3-852e7635e14c",
       "name": "ThinQ Connect Dryer",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_dryer.groovy",
-      "required": true
+      "required": false
     },
     {
       "id": "b6994602-7708-4a14-b99f-e2e4267cd017",
       "name": "ThinQ Connect Dishwasher",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_dishwasher.groovy",
-      "required": true
+      "required": false
     },
     {
       "id": "4ca78989-511c-4f1d-ba39-910814fd3339",
       "name": "ThinQ Connect Cooktop",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_cooktop.groovy",
-      "required": true
+      "required": false
     },
     {
       "id": "c6626634-4630-418b-b082-ab76f99ede11",
       "name": "ThinQ Connect Oven",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_oven.groovy",
-      "required": true
+      "required": false
     },
     {
       "id": "82ebb55f-4cb3-44ba-9999-fa498cb24a42",
       "name": "ThinQ Connect Refrigerator",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_refrigerator.groovy",
-      "required": true
+      "required": false
+    },
+    {
+      "id": "e01512fb-ee60-4042-b7e1-4458124fa022",
+      "name": "ThinQ Connect Microwave Oven",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_microwave_oven.groovy",
+      "required": false
     }
   ]
 }
