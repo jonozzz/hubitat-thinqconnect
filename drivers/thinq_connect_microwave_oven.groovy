@@ -13,7 +13,8 @@ import groovy.json.JsonSlurper
 @Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[2]
 
 metadata {
-    definition(name: "ThinQ Connect Microwave Oven", namespace: "jonozzz", author: "Ionut Turturica") {
+    definition(name: "ThinQ Connect Microwave Oven", namespace: "jonozzz", author: "Ionut Turturica",
+               importUrl: "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_microwave_oven.groovy") {
         capability "Sensor"
         capability "Switch"
         capability "Initialize"

@@ -13,7 +13,8 @@ import groovy.json.JsonSlurper
 @Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[2]
 
 metadata {
-    definition(name: "ThinQ Connect Dryer", namespace: "jonozzz", author: "Ionut Turturica") {
+    definition(name: "ThinQ Connect Dryer", namespace: "jonozzz", author: "Ionut Turturica",
+               importUrl: "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_dryer.groovy") {
         capability "Sensor"
         capability "Switch"
         capability "Initialize"
