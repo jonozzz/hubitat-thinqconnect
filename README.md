@@ -71,6 +71,7 @@ Currently supported device types:
 Currently implemented but untestested:
 - Refrigerators (`DEVICE_REFRIGERATOR`)
 - Ovens (`DEVICE_OVEN`, `DEVICE_COOKTOP`)
+- Air Conditioners (`DEVICE_AIR_CONDITIONER`)
 
 ## Device Capabilities
 

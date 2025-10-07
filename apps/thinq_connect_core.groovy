@@ -46,7 +46,8 @@ preferences {
     "DEVICE_COOKTOP",
     "DEVICE_WASHTOWER_WASHER",
     "DEVICE_WASHTOWER_DRYER",
-    "DEVICE_MICROWAVE_OVEN"
+    "DEVICE_MICROWAVE_OVEN",
+    "DEVICE_AIR_CONDITIONER"
 ]
 
 @Field static def countryList = [
@@ -305,6 +306,8 @@ def getDriverName(deviceType) {
             return "ThinQ Connect Cooktop"
         case "DEVICE_MICROWAVE_OVEN":
             return "ThinQ Connect Microwave Oven"
+        case "DEVICE_AIR_CONDITIONER":
+            return "ThinQ Connect Air Conditioner"
         default:
             return null
     }

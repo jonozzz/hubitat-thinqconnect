@@ -1,7 +1,7 @@
 {
   "packageName": "LG ThinQ Connect Integration",
   "author": "Ionut Turturica",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "minimumHEVersion": "2.2.9",
   "dateReleased": "2025-09-05",
   "apps": [
@@ -63,6 +63,13 @@
       "name": "ThinQ Connect Microwave Oven",
       "namespace": "jonozzz",
       "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_microwave_oven.groovy",
+      "required": false
+    },
+    {
+      "id": "bdf6765c-7004-45ff-a7c3-71b236381865",
+      "name": "ThinQ Connect Air Conditioner",
+      "namespace": "jonozzz",
+      "location": "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_air_conditioner.groovy",
       "required": false
     }
   ]
