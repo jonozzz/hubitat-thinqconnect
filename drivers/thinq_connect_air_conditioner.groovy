@@ -71,6 +71,7 @@ metadata {
         command "start"
         command "stop"
         command "powerOff"
+        command "getDeviceProfile"
         command "setAirConOperationMode", ["string"]
         command "setAirCleanOperationMode", ["string"]
         command "setTargetTemperature", ["number"]
@@ -397,6 +398,11 @@ def processStateData(data) {
         def errorState = cleanEnumValue(data.error)
         sendEvent(name: "error", value: errorState)
     }
+}
+
+def getDeviceProfile() {
+    logger("debug", "getDeviceProfile()")
+    parent.getDeviceProfile(getDeviceId())
 }
 
 def start() {
