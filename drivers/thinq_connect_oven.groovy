@@ -48,6 +48,7 @@ metadata {
         command "setTargetTemperatureF", ["number"]
         command "setTargetTime", ["number", "number"]
         command "setTimer", ["number", "number"]
+        command "getDeviceProfile"
     }
 
     preferences {
@@ -228,6 +229,11 @@ def processStateData(data) {
     if (data.timer?.timerSecond != null) {
         sendEvent(name: "timerSecond", value: data.timer.timerSecond)
     }
+}
+
+def getDeviceProfile() {
+    logger("debug", "getDeviceProfile()")
+    parent.getDeviceProfile(getDeviceId())
 }
 
 def start() {

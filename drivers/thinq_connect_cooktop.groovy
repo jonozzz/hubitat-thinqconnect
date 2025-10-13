@@ -32,6 +32,7 @@ metadata {
         command "setPowerLevel", ["number"]
         command "setRemainHour", ["number"]
         command "setRemainMinute", ["number"]
+        command "getDeviceProfile"
     }
 
     preferences {
@@ -164,6 +165,11 @@ def processStateData(data) {
     if (data.timer?.remainMinute != null) {
         sendEvent(name: "remainMinute", value: data.timer.remainMinute)
     }
+}
+
+def getDeviceProfile() {
+    logger("debug", "getDeviceProfile()")
+    parent.getDeviceProfile(getDeviceId())
 }
 
 def on() {
