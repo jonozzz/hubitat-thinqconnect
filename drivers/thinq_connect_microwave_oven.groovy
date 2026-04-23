@@ -135,12 +135,25 @@ def processStateData(data) {
 
     if (!data) return
 
+    // Normalize payload – API may return a Map or a List with one Map entry
+    if (data instanceof List) {
+        if (data.isEmpty()) return
+        data = data[0]
+    }
+    if (!(data instanceof Map)) return
+
+    def runState = getResourceEntry(data.runState)
+    def timer = getResourceEntry(data.timer)
+    def ventilation = getResourceEntry(data.ventilation)
+    def lamp = getResourceEntry(data.lamp)
+    def remoteControl = getResourceEntry(data.remoteControlEnable)
+
     // Process current state
-    if (data.runState?.currentState) {
-        def currentState = data.runState.currentState
+    if (runState?.currentState) {
+        def currentState = runState.currentState
         sendEvent(name: "currentState", value: currentState)
         
-        def switchState = (currentState =~ /(?i)power_off|pause/ ? 'off' : 'on')
+        def switchState = (currentState =~ /(?i)power_off|pause|off/ ? 'off' : 'on')
         sendEvent(name: "switch", value: switchState)
         
         if (logDescText) {
@@ -149,27 +162,27 @@ def processStateData(data) {
     }
 
     // Process remote control
-    if (data.remoteControlEnable?.remoteControlEnabled != null) {
-        def remoteEnabled = data.remoteControlEnable.remoteControlEnabled ? "enabled" : "disabled"
+    if (remoteControl?.remoteControlEnabled != null) {
+        def remoteEnabled = remoteControl.remoteControlEnabled ? "enabled" : "disabled"
         sendEvent(name: "remoteControlEnabled", value: remoteEnabled)
     }
 
     // Process timer information
-    def remainMinute = data.timer?.remainMinute ?: 0
-    def remainSecond = data.timer?.remainSecond ?: 0
+    def remainMinute = timer?.remainMinute ?: 0
+    def remainSecond = timer?.remainSecond ?: 0
     def remainingTime = (remainMinute * 60) + remainSecond
 
     sendEvent(name: "remainingTime", value: remainingTime, unit: "seconds")
     sendEvent(name: "remainingTimeDisplay", value: convertSecondsToTime(remainingTime))
 
     // Process ventilation fan speed
-    if (data.ventilation?.fanSpeed != null) {
-        sendEvent(name: "fanSpeed", value: data.ventilation.fanSpeed)
+    if (ventilation?.fanSpeed != null) {
+        sendEvent(name: "fanSpeed", value: ventilation.fanSpeed)
     }
 
     // Process lamp brightness
-    if (data.lamp?.lampBrightness != null) {
-        sendEvent(name: "lampBrightness", value: data.lamp.lampBrightness)
+    if (lamp?.lampBrightness != null) {
+        sendEvent(name: "lampBrightness", value: lamp.lampBrightness)
     }
 
     // Process error state
@@ -228,7 +241,7 @@ def setFanSpeed(speed) {
             fanSpeed: speed
         ],
         lamp: [
-            lampBrightness: device.currentValue("lampBrightness")
+            lampBrightness: safeToInt(device.currentValue("lampBrightness"))
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
@@ -239,7 +252,7 @@ def setLampBrightness(brightness) {
     def deviceId = getDeviceId()
     def command = [
         ventilation: [
-            fanSpeed: device.currentValue("fanSpeed")
+            fanSpeed: safeToInt(device.currentValue("fanSpeed"))
         ],
         lamp: [
             lampBrightness: brightness
@@ -269,6 +282,24 @@ def getDeviceId() {
 def getDeviceDetails() {
     def deviceId = getDeviceId()
     return parent.state.foundDevices.find { it.id == deviceId }
+}
+
+private def getResourceEntry(resource) {
+    if (!resource) return null
+    if (resource instanceof List) {
+        return resource.isEmpty() ? null : resource[0]
+    }
+    return (resource instanceof Map) ? resource : null
+}
+
+private Integer safeToInt(value) {
+    if (value == null) return 0
+    try {
+        return value.toString().toInteger()
+    }
+    catch (e) {
+        return 0
+    }
 }
 
 def cleanEnumValue(value) {

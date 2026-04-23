@@ -1,7 +1,7 @@
 /**
  *  ThinQ Connect Refrigerator
  *
- *  Copyright 2025
+ *  Copyright 2026
  *
  *  Uses official LG ThinQ Connect API
  */
@@ -16,6 +16,7 @@ metadata {
     definition(name: "ThinQ Connect Refrigerator", namespace: "jonozzz", author: "Ionut Turturica",
                importUrl: "https://raw.githubusercontent.com/jonozzz/hubitat-thinqconnect/refs/heads/main/drivers/thinq_connect_refrigerator.groovy") {
         capability "Sensor"
+        capability "ContactSensor"
         capability "Initialize"
         capability "Refresh"
 
@@ -137,33 +138,63 @@ def mqttClientStatus(String message) {
 
 def processStateData(data) {
     logger("debug", "processStateData(${data})")
-    data = data[0]
-
+    // Normalize payload – API may return a Map or a List with a single Map entry
     if (!data) return
 
+    if (data instanceof List) {
+        if (data.isEmpty()) return
+        data = data[0]
+    }
+    // If we still don't have a Map, bail out
+    if (!(data instanceof Map)) return
+
     // Process door status
-    if (data.doorStatus?.doorState) {
-        def doorState = data.doorStatus.doorState
-        sendEvent(name: "doorState", value: doorState)
-        
-        if (logDescText) {
-            log.info "${device.displayName} DoorState: ${doorState}"
+    if (data.doorStatus) {
+        def doorEntry = null
+        if (data.doorStatus instanceof List) {
+            // Prefer the MAIN location if present, otherwise first entry
+            doorEntry = data.doorStatus.find { it.locationName == "MAIN" } ?: data.doorStatus[0]
+        }
+        else {
+            doorEntry = data.doorStatus
+        }
+        if (doorEntry?.doorState) {
+            def doorState = doorEntry.doorState
+            sendEvent(name: "doorState", value: doorState)
+
+            def contactValue = (doorState == "OPEN") ? "open" : "closed"
+            sendEvent(name: "contact", value: contactValue, descriptionText: "${device.displayName} contact is ${contactValue}")
+
+            if (logDescText) {
+                log.info "${device.displayName} DoorState: ${doorState} | Contact: ${contactValue}"
+            }
         }
     }
 
     // Process temperature information
     if (data.temperatureInUnits) {
-        // Handle temperature unit
-        if (data.temperatureInUnits.unit) {
-            sendEvent(name: "temperatureUnit", value: data.temperatureInUnits.unit)
+        def tempEntry = null
+        if (data.temperatureInUnits instanceof List) {
+            // Prefer FRIDGE location, otherwise first
+            tempEntry = data.temperatureInUnits.find { it.locationName == "FRIDGE" } ?: data.temperatureInUnits[0]
         }
-        
-        // Handle target temperatures
-        if (data.temperatureInUnits.targetTemperatureC != null) {
-            sendEvent(name: "targetTemperatureC", value: data.temperatureInUnits.targetTemperatureC)
+        else {
+            tempEntry = data.temperatureInUnits
         }
-        if (data.temperatureInUnits.targetTemperatureF != null) {
-            sendEvent(name: "targetTemperatureF", value: data.temperatureInUnits.targetTemperatureF)
+
+        if (tempEntry) {
+            // Handle temperature unit
+            if (tempEntry.unit) {
+                sendEvent(name: "temperatureUnit", value: tempEntry.unit)
+            }
+            
+            // Handle target temperatures
+            if (tempEntry.targetTemperatureC != null) {
+                sendEvent(name: "targetTemperatureC", value: tempEntry.targetTemperatureC)
+            }
+            if (tempEntry.targetTemperatureF != null) {
+                sendEvent(name: "targetTemperatureF", value: tempEntry.targetTemperatureF)
+            }
         }
     }
 

@@ -11,6 +11,26 @@ import groovy.json.JsonSlurper
 
 @Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
 @Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[2]
+@Field List<String> COOKTOP_LOCATIONS = [
+    "CENTER",
+    "CENTER_FRONT",
+    "CENTER_REAR",
+    "LEFT_FRONT",
+    "LEFT_REAR",
+    "RIGHT_FRONT",
+    "RIGHT_REAR",
+    "BURNER_1",
+    "BURNER_2",
+    "BURNER_3",
+    "BURNER_4",
+    "BURNER_5",
+    "BURNER_6",
+    "BURNER_7",
+    "BURNER_8",
+    "INDUCTION_1",
+    "INDUCTION_2",
+    "SOUSVIDE_1"
+]
 
 metadata {
     definition(name: "ThinQ Connect Cooktop", namespace: "jonozzz", author: "Ionut Turturica",
@@ -21,6 +41,8 @@ metadata {
         capability "Refresh"
 
         attribute "currentState", "string"
+        attribute "operationMode", "string"
+        attribute "locationName", "string"
         attribute "powerLevel", "number"
         attribute "remoteControlEnabled", "string"
         
@@ -29,6 +51,7 @@ metadata {
         attribute "remainMinute", "number"
         
         // Commands
+        command "setOperationMode", ["string"]
         command "setPowerLevel", ["number"]
         command "setRemainHour", ["number"]
         command "setRemainMinute", ["number"]
@@ -37,6 +60,7 @@ metadata {
 
     preferences {
         section {
+            input name: "zoneLocation", title: "Cooktop Zone Location", type: "enum", options: ["AUTO"] + COOKTOP_LOCATIONS, defaultValue: "AUTO", required: false
             input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: false
             input name: "logDescText", title: "Log Description Text", type: "bool", defaultValue: false, required: false
         }
@@ -59,6 +83,19 @@ def uninstalled() {
 
 def initialize() {
     logger("debug", "initialize()")
+
+    // If a fixed location is configured, use it; otherwise keep last detected location
+    def configuredLocation = getConfiguredLocation()
+    if (configuredLocation) {
+        updateDataValue("locationName", configuredLocation)
+        sendEvent(name: "locationName", value: configuredLocation)
+    }
+    else {
+        def lastDetectedLocation = getDataValue("locationName")
+        if (lastDetectedLocation) {
+            sendEvent(name: "locationName", value: lastDetectedLocation)
+        }
+    }
 
     if (getDataValue("master") == "true") {
         if (interfaces.mqtt.isConnected())
@@ -130,40 +167,66 @@ def mqttClientStatus(String message) {
 
 def processStateData(data) {
     logger("debug", "processStateData(${data})")
-    data = data[0]
 
     if (!data) return
 
-    // Process current state
-    if (data.cookingZone?.currentState) {
-        def currentState = data.cookingZone.currentState
-        sendEvent(name: "currentState", value: currentState)
-        
-        def switchState = (currentState =~ /(?i)power_off|pause/ ? 'off' : 'on')
-        sendEvent(name: "switch", value: switchState)
-        
-        if (logDescText) {
-            log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
+    // Normalize payload – API may return a Map or a List with one Map entry
+    if (data instanceof List) {
+        if (data.isEmpty()) return
+        data = data[0]
+    }
+    if (!(data instanceof Map)) return
+
+    // Optional top-level operation resource
+    if (data.operation?.operationMode) {
+        def operationMode = cleanEnumValue(data.operation.operationMode)
+        sendEvent(name: "operationMode", value: operationMode)
+    }
+
+    // Select location-specific section when resources are arrays by location
+    def locationName = getActiveLocation()
+
+    // Auto-detect active zone when location is not fixed in preferences
+    if (!getConfiguredLocation()) {
+        def detectedLocation = detectActiveLocation(data)
+        if (detectedLocation && detectedLocation != locationName) {
+            logger("debug", "Auto-detected active cooktop zone: ${detectedLocation}")
+            locationName = detectedLocation
+            updateDataValue("locationName", detectedLocation)
+            sendEvent(name: "locationName", value: detectedLocation)
         }
     }
 
-    // Process power level
-    if (data.power?.powerLevel != null) {
-        sendEvent(name: "powerLevel", value: data.power.powerLevel)
+    def zoneEntry = selectLocationEntry(data.cookingZone, locationName)
+    if (zoneEntry?.currentState) {
+        def currentState = zoneEntry.currentState
+        sendEvent(name: "currentState", value: currentState)
+
+        def switchState = (currentState =~ /(?i)power_off|pause|off/ ? 'off' : 'on')
+        sendEvent(name: "switch", value: switchState)
+
+        if (logDescText) {
+            log.info "${device.displayName} [${locationName}] CurrentState: ${currentState}, Switch: ${switchState}"
+        }
     }
 
-    // Process remote control
-    if (data.remoteControlEnable?.remoteControlEnabled != null) {
-        def remoteEnabled = data.remoteControlEnable.remoteControlEnabled ? "enabled" : "disabled"
+    def powerEntry = selectLocationEntry(data.power, locationName)
+    if (powerEntry?.powerLevel != null) {
+        sendEvent(name: "powerLevel", value: powerEntry.powerLevel)
+    }
+
+    def remoteEntry = selectLocationEntry(data.remoteControlEnable, locationName)
+    if (remoteEntry?.remoteControlEnabled != null) {
+        def remoteEnabled = remoteEntry.remoteControlEnabled ? "enabled" : "disabled"
         sendEvent(name: "remoteControlEnabled", value: remoteEnabled)
     }
 
-    // Process timer information
-    if (data.timer?.remainHour != null) {
-        sendEvent(name: "remainHour", value: data.timer.remainHour)
+    def timerEntry = selectLocationEntry(data.timer, locationName)
+    if (timerEntry?.remainHour != null) {
+        sendEvent(name: "remainHour", value: timerEntry.remainHour)
     }
-    if (data.timer?.remainMinute != null) {
-        sendEvent(name: "remainMinute", value: data.timer.remainMinute)
+    if (timerEntry?.remainMinute != null) {
+        sendEvent(name: "remainMinute", value: timerEntry.remainMinute)
     }
 }
 
@@ -174,12 +237,23 @@ def getDeviceProfile() {
 
 def on() {
     logger("debug", "on()")
-    // Cooktop doesn't have a simple on command, so we'll leave this empty
+    // No generic ON command in API; use setPowerLevel for the selected zone
 }
 
 def off() {
     logger("debug", "off()")
-    // Cooktop doesn't have a simple off command, so we'll leave this empty
+    // No generic OFF command in API; use setPowerLevel(0) or timer controls for the selected zone
+}
+
+def setOperationMode(mode) {
+    logger("debug", "setOperationMode(${mode})")
+    def deviceId = getDeviceId()
+    def command = [
+        operation: [
+            operationMode: mode
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
 }
 
 def setPowerLevel(level) {
@@ -187,7 +261,12 @@ def setPowerLevel(level) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "CENTER"  // Default location, in a real implementation this might need to be configurable
+            locationName: getActiveLocation()
+        ],
+        // Keep timer in payload to mirror Python custom command behavior
+        timer: [
+            remainHour: (device.currentValue("remainHour") ?: 0) as Integer,
+            remainMinute: (device.currentValue("remainMinute") ?: 0) as Integer
         ],
         power: [
             powerLevel: level
@@ -201,10 +280,15 @@ def setRemainHour(hours) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "CENTER"  // Default location, in a real implementation this might need to be configurable
+            locationName: getActiveLocation()
+        ],
+        // Keep power/timer together to mirror Python custom command behavior
+        power: [
+            powerLevel: (device.currentValue("powerLevel") ?: 0) as Integer
         ],
         timer: [
-            remainHour: hours
+            remainHour: hours,
+            remainMinute: (device.currentValue("remainMinute") ?: 0) as Integer
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
@@ -215,13 +299,99 @@ def setRemainMinute(minutes) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "CENTER"  // Default location, in a real implementation this might need to be configurable
+            locationName: getActiveLocation()
+        ],
+        // Keep power/timer together to mirror Python custom command behavior
+        power: [
+            powerLevel: (device.currentValue("powerLevel") ?: 0) as Integer
         ],
         timer: [
+            remainHour: (device.currentValue("remainHour") ?: 0) as Integer,
             remainMinute: minutes
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
+}
+
+private def getActiveLocation() {
+    def configuredLocation = getConfiguredLocation()
+    def loc = configuredLocation ?: getDataValue("locationName") ?: "CENTER"
+    return COOKTOP_LOCATIONS.contains(loc) ? loc : "CENTER"
+}
+
+private def getConfiguredLocation() {
+    def loc = zoneLocation
+    if (!loc || loc == "AUTO") return null
+    return COOKTOP_LOCATIONS.contains(loc) ? loc : null
+}
+
+private def detectActiveLocation(data) {
+    // Priority 1: active power level (>0)
+    def byPower = findLocationByResource(data.power) { entry ->
+        ((entry?.powerLevel ?: 0) as Integer) > 0
+    }
+    if (byPower) return byPower
+
+    // Priority 2: current state that looks active
+    def byState = findLocationByResource(data.cookingZone) { entry ->
+        def state = (entry?.currentState ?: "").toString()
+        return state && !(state =~ /(?i)^power_off$|^off$|^pause$|^standby$/)
+    }
+    if (byState) return byState
+
+    // Priority 3: active timer
+    def byTimer = findLocationByResource(data.timer) { entry ->
+        def h = (entry?.remainHour ?: 0) as Integer
+        def m = (entry?.remainMinute ?: 0) as Integer
+        return (h > 0 || m > 0)
+    }
+    if (byTimer) return byTimer
+
+    // Fallback: first valid location in known resources
+    return firstLocationFromResources([data.cookingZone, data.power, data.remoteControlEnable, data.timer])
+}
+
+private def findLocationByResource(resource, Closure<Boolean> matcher) {
+    if (!(resource instanceof List)) return null
+
+    def found = resource.find { entry ->
+        def loc = extractLocationName(entry)
+        return loc && COOKTOP_LOCATIONS.contains(loc) && matcher(entry)
+    }
+
+    return extractLocationName(found)
+}
+
+private def firstLocationFromResources(resources) {
+    for (resource in resources) {
+        if (resource instanceof List) {
+            def found = resource.find { entry ->
+                def loc = extractLocationName(entry)
+                return loc && COOKTOP_LOCATIONS.contains(loc)
+            }
+            def loc = extractLocationName(found)
+            if (loc) return loc
+        }
+    }
+    return null
+}
+
+private def extractLocationName(entry) {
+    if (!(entry instanceof Map)) return null
+    return entry?.location?.locationName ?: entry?.locationName
+}
+
+private def selectLocationEntry(resource, String locationName) {
+    if (!resource) return null
+
+    if (resource instanceof List) {
+        def entry = resource.find {
+            it?.location?.locationName == locationName || it?.locationName == locationName
+        }
+        return entry ?: resource[0]
+    }
+
+    return (resource instanceof Map) ? resource : null
 }
 
 def getDeviceId() {

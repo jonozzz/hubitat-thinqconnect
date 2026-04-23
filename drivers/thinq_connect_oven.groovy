@@ -11,6 +11,7 @@ import groovy.json.JsonSlurper
 
 @Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
 @Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[2]
+@Field List<String> OVEN_LOCATIONS = ["OVEN", "UPPER", "LOWER"]
 
 metadata {
     definition(name: "ThinQ Connect Oven", namespace: "jonozzz", author: "Ionut Turturica",
@@ -23,6 +24,7 @@ metadata {
         attribute "currentState", "string"
         attribute "ovenOperationMode", "string"
         attribute "cookMode", "string"
+        attribute "locationName", "string"
         attribute "remoteControlEnabled", "string"
         attribute "temperatureUnit", "string"
         attribute "targetTemperatureC", "number"
@@ -53,6 +55,7 @@ metadata {
 
     preferences {
         section {
+            input name: "ovenLocation", title: "Oven Location", type: "enum", options: OVEN_LOCATIONS, defaultValue: "OVEN", required: false
             input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: false
             input name: "logDescText", title: "Log Description Text", type: "bool", defaultValue: false, required: false
         }
@@ -75,6 +78,10 @@ def uninstalled() {
 
 def initialize() {
     logger("debug", "initialize()")
+
+    def locationName = getActiveLocation()
+    updateDataValue("locationName", locationName)
+    sendEvent(name: "locationName", value: locationName)
 
     if (getDataValue("master") == "true") {
         if (interfaces.mqtt.isConnected())
@@ -146,88 +153,106 @@ def mqttClientStatus(String message) {
 
 def processStateData(data) {
     logger("debug", "processStateData(${data})")
-    data = data[0]
 
     if (!data) return
 
+    // Normalize payload – API may return a Map or a List with one Map entry
+    if (data instanceof List) {
+        if (data.isEmpty()) return
+        data = data[0]
+    }
+    if (!(data instanceof Map)) return
+
+    def locationName = getActiveLocation()
+
+    def runState = selectLocationEntry(data.runState, locationName)
+    def operation = selectLocationEntry(data.operation, locationName)
+    def cook = selectLocationEntry(data.cook, locationName)
+    def remoteControl = selectLocationEntry(data.remoteControlEnable, locationName)
+    def timer = selectLocationEntry(data.timer, locationName)
+    def temperatureEntries = getLocationTemperatureEntries(data.temperature, locationName)
+
     // Process current state
-    if (data.runState?.currentState) {
-        def currentState = data.runState.currentState
+    if (runState?.currentState) {
+        def currentState = runState.currentState
         sendEvent(name: "currentState", value: currentState)
         
-        def switchState = (currentState =~ /(?i)power_off|pause/ ? 'off' : 'on')
+        def switchState = (currentState =~ /(?i)power_off|pause|off/ ? 'off' : 'on')
         sendEvent(name: "switch", value: switchState)
         
         if (logDescText) {
-            log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
+            log.info "${device.displayName} [${locationName}] CurrentState: ${currentState}, Switch: ${switchState}"
         }
     }
 
     // Process operation mode
-    if (data.operation?.ovenOperationMode) {
-        def opMode = cleanEnumValue(data.operation.ovenOperationMode)
+    if (operation?.ovenOperationMode) {
+        def opMode = cleanEnumValue(operation.ovenOperationMode)
         sendEvent(name: "ovenOperationMode", value: opMode)
     }
 
     // Process cook mode
-    if (data.cook?.cookMode) {
-        def cookMode = cleanEnumValue(data.cook.cookMode)
+    if (cook?.cookMode) {
+        def cookMode = cleanEnumValue(cook.cookMode)
         sendEvent(name: "cookMode", value: cookMode)
     }
 
     // Process remote control
-    if (data.remoteControlEnable?.remoteControlEnabled != null) {
-        def remoteEnabled = data.remoteControlEnable.remoteControlEnabled ? "enabled" : "disabled"
+    if (remoteControl?.remoteControlEnabled != null) {
+        def remoteEnabled = remoteControl.remoteControlEnabled ? "enabled" : "disabled"
         sendEvent(name: "remoteControlEnabled", value: remoteEnabled)
     }
 
-    // Process temperature
-    if (data.temperature) {
-        // Handle temperature unit
-        if (data.temperature.unit) {
-            sendEvent(name: "temperatureUnit", value: data.temperature.unit)
-        }
-        
-        // Handle target temperatures
-        if (data.temperature.targetTemperature != null) {
-            def tempValue = data.temperature.targetTemperature
-            def tempUnit = data.temperature.unit ?: "C"
-            
-            if (tempUnit == "C") {
+    // Process temperature (SDK model supports entries by unit)
+    if (temperatureEntries) {
+        temperatureEntries.each { temp ->
+            def tempUnit = temp?.unit?.toString()?.toUpperCase()
+            def tempValue = temp?.targetTemperature
+
+            if (tempValue != null && tempUnit == "C") {
                 sendEvent(name: "targetTemperatureC", value: tempValue)
-            } else if (tempUnit == "F") {
+            }
+            else if (tempValue != null && tempUnit == "F") {
                 sendEvent(name: "targetTemperatureF", value: tempValue)
             }
+        }
+
+        def lastUnit = device.currentValue("temperatureUnit")?.toString()?.toUpperCase()
+        def preferredUnit = temperatureEntries.find { it?.unit?.toString()?.toUpperCase() == lastUnit }?.unit ?:
+            temperatureEntries.find { it?.unit?.toString()?.toUpperCase() == "C" }?.unit ?:
+            temperatureEntries[0]?.unit
+        if (preferredUnit) {
+            sendEvent(name: "temperatureUnit", value: preferredUnit)
         }
     }
 
     // Process timer information
-    if (data.timer?.remainHour != null) {
-        sendEvent(name: "remainHour", value: data.timer.remainHour)
+    if (timer?.remainHour != null) {
+        sendEvent(name: "remainHour", value: timer.remainHour)
     }
-    if (data.timer?.remainMinute != null) {
-        sendEvent(name: "remainMinute", value: data.timer.remainMinute)
+    if (timer?.remainMinute != null) {
+        sendEvent(name: "remainMinute", value: timer.remainMinute)
     }
-    if (data.timer?.remainSecond != null) {
-        sendEvent(name: "remainSecond", value: data.timer.remainSecond)
+    if (timer?.remainSecond != null) {
+        sendEvent(name: "remainSecond", value: timer.remainSecond)
     }
-    if (data.timer?.targetHour != null) {
-        sendEvent(name: "targetHour", value: data.timer.targetHour)
+    if (timer?.targetHour != null) {
+        sendEvent(name: "targetHour", value: timer.targetHour)
     }
-    if (data.timer?.targetMinute != null) {
-        sendEvent(name: "targetMinute", value: data.timer.targetMinute)
+    if (timer?.targetMinute != null) {
+        sendEvent(name: "targetMinute", value: timer.targetMinute)
     }
-    if (data.timer?.targetSecond != null) {
-        sendEvent(name: "targetSecond", value: data.timer.targetSecond)
+    if (timer?.targetSecond != null) {
+        sendEvent(name: "targetSecond", value: timer.targetSecond)
     }
-    if (data.timer?.timerHour != null) {
-        sendEvent(name: "timerHour", value: data.timer.timerHour)
+    if (timer?.timerHour != null) {
+        sendEvent(name: "timerHour", value: timer.timerHour)
     }
-    if (data.timer?.timerMinute != null) {
-        sendEvent(name: "timerMinute", value: data.timer.timerMinute)
+    if (timer?.timerMinute != null) {
+        sendEvent(name: "timerMinute", value: timer.timerMinute)
     }
-    if (data.timer?.timerSecond != null) {
-        sendEvent(name: "timerSecond", value: data.timer.timerSecond)
+    if (timer?.timerSecond != null) {
+        sendEvent(name: "timerSecond", value: timer.timerSecond)
     }
 }
 
@@ -241,7 +266,7 @@ def start() {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
         ],
         operation: [
             ovenOperationMode: "START"
@@ -255,7 +280,7 @@ def stop() {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
         ],
         operation: [
             ovenOperationMode: "STOP"
@@ -277,7 +302,7 @@ def setOvenOperationMode(mode) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
         ],
         operation: [
             ovenOperationMode: mode
@@ -291,7 +316,10 @@ def setCookMode(mode) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
+        ],
+        operation: [
+            ovenOperationMode: "START"
         ],
         cook: [
             cookMode: mode
@@ -305,7 +333,10 @@ def setTargetTemperatureC(temperature) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
+        ],
+        operation: [
+            ovenOperationMode: "START"
         ],
         temperature: [
             targetTemperature: temperature,
@@ -320,7 +351,10 @@ def setTargetTemperatureF(temperature) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
+        ],
+        operation: [
+            ovenOperationMode: "START"
         ],
         temperature: [
             targetTemperature: temperature,
@@ -335,7 +369,7 @@ def setTargetTime(hour, minute) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
         ],
         operation: [
             ovenOperationMode: "START"
@@ -353,7 +387,7 @@ def setTimer(hour, minute) {
     def deviceId = getDeviceId()
     def command = [
         location: [
-            locationName: "OVEN"
+            locationName: getActiveLocation()
         ],
         timer: [
             timerHour: hour,
@@ -361,6 +395,42 @@ def setTimer(hour, minute) {
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
+}
+
+private def getActiveLocation() {
+    def loc = ovenLocation ?: getDataValue("locationName") ?: "OVEN"
+    return OVEN_LOCATIONS.contains(loc) ? loc : "OVEN"
+}
+
+private def selectLocationEntry(resource, String locationName) {
+    if (!resource) return null
+
+    if (resource instanceof List) {
+        def entry = resource.find {
+            it?.location?.locationName == locationName || it?.locationName == locationName
+        }
+        return entry ?: resource[0]
+    }
+
+    return (resource instanceof Map) ? resource : null
+}
+
+private def getLocationTemperatureEntries(resource, String locationName) {
+    if (!resource) return null
+
+    if (resource instanceof List) {
+        // Prefer same location if location markers exist; otherwise keep all entries
+        def locationEntries = resource.findAll {
+            it?.location?.locationName == locationName || it?.locationName == locationName
+        }
+        if (locationEntries) {
+            return locationEntries
+        }
+
+        return resource
+    }
+
+    return (resource instanceof Map) ? [resource] : null
 }
 
 def getDeviceId() {

@@ -2,7 +2,7 @@
  *
  *  LG ThinQ Connect Integration
  *
- *  Copyright 2025
+ *  Copyright 2026
  *
  *  Uses the official LG ThinQ Connect API with PAT token authentication
  *  Based on the pythinqconnect SDK and Home Assistant integration
@@ -44,13 +44,14 @@ preferences {
     "DEVICE_REFRIGERATOR",
     "DEVICE_OVEN",
     "DEVICE_COOKTOP",
+    "DEVICE_WASHTOWER",
     "DEVICE_WASHTOWER_WASHER",
     "DEVICE_WASHTOWER_DRYER",
     "DEVICE_MICROWAVE_OVEN",
     "DEVICE_AIR_CONDITIONER"
 ]
 
-@Field static def countryList = [
+@Field static def countryNameMap = [
     "US": "United States",
     "CA": "Canada", 
     "KR": "South Korea",
@@ -69,11 +70,28 @@ preferences {
 ]
 
 @Field static def regionMapping = [
-    "US": "aic", "CA": "aic",
-    "KR": "kic", "JP": "kic", "AU": "kic",
-    "GB": "eic", "DE": "eic", "FR": "eic", "IT": "eic", 
-    "ES": "eic", "NL": "eic", "SE": "eic", "NO": "eic", 
-    "DK": "eic", "FI": "eic"
+    // KIC
+    "AU": "kic", "BD": "kic", "CN": "kic", "HK": "kic", "ID": "kic", "IN": "kic", "JP": "kic", "KH": "kic", "KR": "kic", "LA": "kic",
+    "LK": "kic", "MM": "kic", "MY": "kic", "NP": "kic", "NZ": "kic", "PH": "kic", "SG": "kic", "TH": "kic", "TW": "kic", "VN": "kic",
+
+    // AIC
+    "AG": "aic", "AR": "aic", "AW": "aic", "BB": "aic", "BO": "aic", "BR": "aic", "BS": "aic", "BZ": "aic", "CA": "aic", "CL": "aic",
+    "CO": "aic", "CR": "aic", "CU": "aic", "DM": "aic", "DO": "aic", "EC": "aic", "GD": "aic", "GT": "aic", "GY": "aic", "HN": "aic",
+    "HT": "aic", "JM": "aic", "KN": "aic", "LC": "aic", "MX": "aic", "NI": "aic", "PA": "aic", "PE": "aic", "PR": "aic", "PY": "aic",
+    "SR": "aic", "SV": "aic", "TT": "aic", "US": "aic", "UY": "aic", "VC": "aic", "VE": "aic",
+
+    // EIC
+    "AE": "eic", "AF": "eic", "AL": "eic", "AM": "eic", "AO": "eic", "AT": "eic", "AZ": "eic", "BA": "eic", "BE": "eic", "BF": "eic",
+    "BG": "eic", "BH": "eic", "BJ": "eic", "BY": "eic", "CD": "eic", "CF": "eic", "CG": "eic", "CH": "eic", "CI": "eic", "CM": "eic",
+    "CV": "eic", "CY": "eic", "CZ": "eic", "DE": "eic", "DJ": "eic", "DK": "eic", "DZ": "eic", "EE": "eic", "EG": "eic", "ES": "eic",
+    "ET": "eic", "FI": "eic", "FR": "eic", "GA": "eic", "GB": "eic", "GE": "eic", "GH": "eic", "GM": "eic", "GN": "eic", "GQ": "eic",
+    "GR": "eic", "HR": "eic", "HU": "eic", "IE": "eic", "IL": "eic", "IQ": "eic", "IR": "eic", "IS": "eic", "IT": "eic", "JO": "eic",
+    "KE": "eic", "KG": "eic", "KW": "eic", "KZ": "eic", "LB": "eic", "LR": "eic", "LT": "eic", "LU": "eic", "LV": "eic", "LY": "eic",
+    "MA": "eic", "MD": "eic", "ME": "eic", "MK": "eic", "ML": "eic", "MR": "eic", "MT": "eic", "MU": "eic", "MW": "eic", "NE": "eic",
+    "NG": "eic", "NL": "eic", "NO": "eic", "OM": "eic", "PK": "eic", "PL": "eic", "PS": "eic", "PT": "eic", "QA": "eic", "RO": "eic",
+    "RS": "eic", "RU": "eic", "RW": "eic", "SA": "eic", "SD": "eic", "SE": "eic", "SI": "eic", "SK": "eic", "SL": "eic", "SN": "eic",
+    "SO": "eic", "ST": "eic", "SY": "eic", "TD": "eic", "TG": "eic", "TN": "eic", "TR": "eic", "TZ": "eic", "UA": "eic", "UG": "eic",
+    "UZ": "eic", "XK": "eic", "YE": "eic", "ZA": "eic", "ZM": "eic"
 ]
 
 @Field static def caCertUrl = "https://www.amazontrust.com/repository/AmazonRootCA1.pem"
@@ -109,7 +127,7 @@ def prefAuth() {
     return dynamicPage(name: "prefAuth", title: "Authentication Setup", nextPage: "prefMqtt", uninstall: false, install: false) {
         section("ThinQ Connect API") {
             input "patToken", "text", title: "PAT Token", description: "Enter your Personal Access Token from LG ThinQ Connect", required: true
-            input "countryCode", "enum", title: "Country", options: countryList, required: true, submitOnChange: true
+            input "countryCode", "enum", title: "Country", options: getCountryOptions(), required: true, submitOnChange: true
             
             if (countryCode) {
                 state.region = regionMapping[countryCode] ?: "aic"
@@ -132,6 +150,18 @@ def prefAuth() {
             }
         }
     }
+}
+
+def getCountryOptions() {
+    def options = [:]
+
+    // Show all supported countries from region mapping.
+    // Use friendly names where defined, otherwise show ISO code.
+    regionMapping.keySet().sort().each { code ->
+        options[code] = countryNameMap[code] ?: code
+    }
+
+    return options
 }
 
 def prefMqtt() {
@@ -290,6 +320,8 @@ def initialize() {
 
 def getDriverName(deviceType) {
     switch (deviceType) {
+        case "DEVICE_WASHTOWER":
+            return "ThinQ Connect WashTower"
         case "DEVICE_WASHER":
         case "DEVICE_WASHTOWER_WASHER":
             return "ThinQ Connect Washer"

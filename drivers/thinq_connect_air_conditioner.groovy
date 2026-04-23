@@ -1,7 +1,7 @@
 /**
  *  ThinQ Connect Air Conditioner
  *
- *  Copyright 2025
+ *  Copyright 2026
  *
  *  Uses official LG ThinQ Connect API
  */
@@ -19,77 +19,77 @@ metadata {
         capability "Initialize"
         capability "Refresh"
         capability "TemperatureMeasurement"
-        // capability "ThermostatHeatingSetpoint"
+        // capability "ThermostatHeatingSetpoint" // Uncomment if using heatTargetTemperature as heating setpoint
         capability "ThermostatCoolingSetpoint"
 
         attribute "currentState", "string"
         attribute "currentJobMode", "string"
         attribute "airConOperationMode", "string"
-        // attribute "airCleanOperationMode", "string"
+        attribute "airCleanOperationMode", "string"
         attribute "currentTemperature", "number"
         attribute "targetTemperature", "number"
-        // attribute "minTargetTemperature", "number"
-        // attribute "maxTargetTemperature", "number"
-        // attribute "heatTargetTemperature", "number"
+        attribute "minTargetTemperature", "number"
+        attribute "maxTargetTemperature", "number"
+        attribute "heatTargetTemperature", "number"
         attribute "coolTargetTemperature", "number"
         attribute "temperatureUnit", "string"
-        // attribute "twoSetEnabled", "string"
-        // attribute "windStrength", "string"
-        // attribute "windStep", "number"
-        // attribute "rotateUpDown", "string"
-        // attribute "rotateLeftRight", "string"
-        // attribute "light", "string"
-        // attribute "powerSaveEnabled", "string"
-        // attribute "airQualityMonitoringEnabled", "string"
-        // attribute "pm1", "number"
-        // attribute "pm2", "number"
-        // attribute "pm10", "number"
-        // attribute "odorLevel", "string"
-        // attribute "humidity", "number"
-        // attribute "totalPollutionLevel", "string"
-        // attribute "filterRemainPercent", "number"
+        attribute "twoSetEnabled", "string"
+        attribute "windStrength", "string"
+        attribute "windStep", "number"
+        attribute "rotateUpDown", "string"
+        attribute "rotateLeftRight", "string"
+        attribute "light", "string"
+        attribute "powerSaveEnabled", "string"
+        attribute "airQualityMonitoringEnabled", "string"
+        attribute "pm1", "number"
+        attribute "pm2", "number"
+        attribute "pm10", "number"
+        attribute "odorLevel", "string"
+        attribute "humidity", "number"
+        attribute "totalPollutionLevel", "string"
+        attribute "filterRemainPercent", "number"
         attribute "filterUsedTime", "number"
         attribute "filterLifetime", "number"
         attribute "error", "string"
-        // attribute "remoteControlEnabled", "string"
+        // attribute "remoteControlEnabled", "string" // Not exposed by profile
         
         // Timer attributes
         attribute "relativeHourToStart", "number"
         attribute "relativeMinuteToStart", "number"
         attribute "relativeHourToStop", "number"
         attribute "relativeMinuteToStop", "number"
-        // attribute "absoluteHourToStart", "number"
-        // attribute "absoluteMinuteToStart", "number"
-        // attribute "absoluteHourToStop", "number"
-        // attribute "absoluteMinuteToStop", "number"
+        attribute "absoluteHourToStart", "number"
+        attribute "absoluteMinuteToStart", "number"
+        attribute "absoluteHourToStop", "number"
+        attribute "absoluteMinuteToStop", "number"
         
         // Sleep timer attributes
-        // attribute "sleepRelativeHourToStop", "number"
-        // attribute "sleepRelativeMinuteToStop", "number"
+        attribute "sleepRelativeHourToStop", "number"
+        attribute "sleepRelativeMinuteToStop", "number"
         
         // Commands
         command "start"
         command "stop"
         // command "powerOff"
         command "getDeviceProfile"
-        // command "setAirConOperationMode", ["string"]
-        // command "setAirCleanOperationMode", ["string"]
+        command "setAirConOperationMode", ["string"]
+        command "setAirCleanOperationMode", ["string"]
         command "setAirConJobMode", [[name:"Set AirConJobMode", type: "ENUM", description: "Select AirCon Job Mode", constraints: ["COOL", "ENERGY_SAVING", "AIR_DRY", "FAN"]]]
-        // command "setTargetTemperature", ["number"]
-        // command "setHeatTargetTemperature", ["number"]
-        // command "setCoolTargetTemperature", ["number"]
+        command "setTargetTemperature", ["number"]
+        command "setHeatTargetTemperature", ["number"]
+        command "setCoolTargetTemperature", ["number"]
         command "setWindStrength", [[name:"Set Wind Strength", type: "ENUM", description: "Select Wind Strength", constraints: ["LOW", "MID", "HIGH"]]]
-        // command "setWindStep", ["number"]
-        // command "setRotateUpDown", ["string"]
-        // command "setRotateLeftRight", ["string"]
-        // command "setLight", ["string"]
-        // command "setPowerSave", ["string"]
-        // command "setTwoSetEnabled", ["string"]
+        command "setWindStep", ["number"]
+        command "setRotateUpDown", ["string"]
+        command "setRotateLeftRight", ["string"]
+        command "setLight", ["string"]
+        command "setPowerSave", ["string"]
+        command "setTwoSetEnabled", ["string"]
         command "setDelayStart", [[name:"Set Delay Start", type: "NUMBER", description: "Select Delay Start in minutes"]]
         command "setDelayStop", [[name:"Set Delay Stop", type: "NUMBER", description: "Select Delay Stop in minutes"]]
         command "unsetStopTimer"
         command "unsetStartTimer"
-        // command "setAbsoluteStart", ["number", "number"]
+        command "setAbsoluteStart", ["number", "number"]
     }
 
     preferences {
@@ -189,16 +189,19 @@ def mqttClientStatus(String message) {
 def processStateData(data) {
     logger("debug", "processStateData(${data})")
 
+    // Normalize payload – API may return a Map or a List with a single Map entry
     if (!data) return
+    if (data instanceof List) {
+        if (data.isEmpty()) return
+        data = data[0]
+    }
+    if (!(data instanceof Map)) return
 
     // Process current state
+    def currentState = null
     if (data.runState?.currentState) {
-        def currentState = data.runState.currentState
+        currentState = data.runState.currentState
         sendEvent(name: "currentState", value: currentState)
-        
-        if (logDescText) {
-            log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
-        }
     }
 
     // Process job mode
@@ -211,117 +214,138 @@ def processStateData(data) {
     if (data.operation?.airConOperationMode) {
         def opMode = cleanEnumValue(data.operation.airConOperationMode)
         sendEvent(name: "airConOperationMode", value: opMode)
-        
-        def switchState = (currentState =~ /(?i)power_off/ ? 'off' : 'on')
+    }
+
+    // Derive switch state from runState or operation mode
+    if (currentState || data.operation?.airConOperationMode) {
+        def modeText = currentState ?: data.operation?.airConOperationMode ?: ""
+        def switchState = (modeText =~ /(?i)power_off|off/ ? 'off' : 'on')
         sendEvent(name: "switch", value: switchState)
+        if (logDescText && currentState) {
+            log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
+        }
     }
 
-    // if (data.operation?.airCleanOperationMode) {
-    //     def cleanMode = cleanEnumValue(data.operation.airCleanOperationMode)
-    //     sendEvent(name: "airCleanOperationMode", value: cleanMode)
-    // }
-
-    // Process remote control
-    // if (data.remoteControlEnable?.remoteControlEnabled != null) {
-    //     def remoteEnabled = data.remoteControlEnable.remoteControlEnabled ? "enabled" : "disabled"
-    //     sendEvent(name: "remoteControlEnabled", value: remoteEnabled)
-    // }
-
-    // Process temperature information
-    // if (data.temperature?.currentTemperatureC != null) {
-    //     def currentTemp = data.temperature.currentTemperatureC
-    //     sendEvent(name: "currentTemperature", value: currentTemp, unit: "C")
-    //     sendEvent(name: "temperature", value: currentTemp, unit: "C")
-    // } else 
-    if (data.temperature?.currentTemperature != null) {
-        def currentTemp = data.temperature.currentTemperature
-        sendEvent(name: "currentTemperature", value: currentTemp, unit: "F")
-        sendEvent(name: "temperature", value: currentTemp, unit: "F")
+    if (data.operation?.airCleanOperationMode) {
+        def cleanMode = cleanEnumValue(data.operation.airCleanOperationMode)
+        sendEvent(name: "airCleanOperationMode", value: cleanMode)
     }
 
-    // if (data.temperature?.targetTemperatureC != null) {
-    //     def targetTemp = data.temperature.targetTemperatureC
-    //     sendEvent(name: "targetTemperature", value: targetTemp, unit: "C")
-    //     sendEvent(name: "coolingSetpoint", value: targetTemp, unit: "C")
-    // } else 
-    if (data.temperature?.targetTemperature != null) {
-        def targetTemp = data.temperature.targetTemperature
-        sendEvent(name: "targetTemperature", value: targetTemp, unit: "F")
-        sendEvent(name: "coolingSetpoint", value: targetTemp, unit: "F")
-    }
+    // Remote control not exposed by profile; leave disabled
 
-    // if (data.temperature?.minTargetTemperatureC != null) {
-    //     sendEvent(name: "minTargetTemperature", value: data.temperature.minTargetTemperatureC)
-    // } else 
-    if (data.temperature?.minTargetTemperature != null) {
-        sendEvent(name: "minTargetTemperature", value: data.temperature.minTargetTemperature)
-    }
+    // Process temperature information (temperatureInUnits can be a list by unit)
+    if (data.temperatureInUnits) {
+        def tempEntry = null
+        if (data.temperatureInUnits instanceof List) {
+            def preferredUnit = isFahrenheit ? "F" : "C"
+            tempEntry = data.temperatureInUnits.find { it.unit == preferredUnit } ?: data.temperatureInUnits[0]
+        }
+        else {
+            tempEntry = data.temperatureInUnits
+        }
 
-    // if (data.temperature?.maxTargetTemperatureC != null) {
-    //     sendEvent(name: "maxTargetTemperature", value: data.temperature.maxTargetTemperatureC)
-    // } else 
-    if (data.temperature?.maxTargetTemperature != null) {
-        sendEvent(name: "maxTargetTemperature", value: data.temperature.maxTargetTemperature)
-    }
+        if (tempEntry) {
+            if (tempEntry.unit) {
+                sendEvent(name: "temperatureUnit", value: tempEntry.unit)
+            }
 
-    // if (data.temperature?.unit) {
-    //     sendEvent(name: "temperatureUnit", value: data.temperature.unit)
-    // }
+            if (tempEntry.currentTemperature != null) {
+                sendEvent(name: "currentTemperature", value: tempEntry.currentTemperature, unit: tempEntry.unit)
+                sendEvent(name: "temperature", value: tempEntry.currentTemperature, unit: tempEntry.unit)
+            }
+
+            if (tempEntry.targetTemperature != null) {
+                sendEvent(name: "targetTemperature", value: tempEntry.targetTemperature, unit: tempEntry.unit)
+                sendEvent(name: "coolingSetpoint", value: tempEntry.targetTemperature, unit: tempEntry.unit)
+            }
+
+            if (tempEntry.minTargetTemperature != null) {
+                sendEvent(name: "minTargetTemperature", value: tempEntry.minTargetTemperature)
+            }
+
+            if (tempEntry.maxTargetTemperature != null) {
+                sendEvent(name: "maxTargetTemperature", value: tempEntry.maxTargetTemperature)
+            }
+
+            if (tempEntry.heatTargetTemperature != null) {
+                sendEvent(name: "heatTargetTemperature", value: tempEntry.heatTargetTemperature, unit: tempEntry.unit)
+            }
+
+            if (tempEntry.coolTargetTemperature != null) {
+                sendEvent(name: "coolTargetTemperature", value: tempEntry.coolTargetTemperature, unit: tempEntry.unit)
+            }
+
+            if (tempEntry.autoTargetTemperature != null) {
+                sendEvent(name: "autoTargetTemperature", value: tempEntry.autoTargetTemperature, unit: tempEntry.unit)
+            }
+        }
+    }
 
     // Process two set temperature
-    // if (data.twoSetTemperature?.twoSetEnabled != null) {
-    //     def twoSet = data.twoSetTemperature.twoSetEnabled ? "enabled" : "disabled"
-    //     sendEvent(name: "twoSetEnabled", value: twoSet)
-    // }
-
-    // if (data.twoSetTemperatureInUnits?.heatTargetTemperatureC != null) {
-    //     sendEvent(name: "heatTargetTemperature", value: data.twoSetTemperatureInUnits.heatTargetTemperatureC)
-    //     sendEvent(name: "heatingSetpoint", value: data.twoSetTemperatureInUnits.heatTargetTemperatureC)
-    // } else if (data.twoSetTemperatureInUnits?.heatTargetTemperatureF != null) {
-    //     sendEvent(name: "heatTargetTemperature", value: data.twoSetTemperatureInUnits.heatTargetTemperatureF)
-    //     sendEvent(name: "heatingSetpoint", value: data.twoSetTemperatureInUnits.heatTargetTemperatureF)
-    // }
-
-    // if (data.twoSetTemperatureInUnits?.coolTargetTemperatureC != null) {
-    //     sendEvent(name: "coolTargetTemperature", value: data.twoSetTemperatureInUnits.coolTargetTemperatureC)
-    //     sendEvent(name: "coolingSetpoint", value: data.twoSetTemperatureInUnits.coolTargetTemperatureC)
-    // } else if (data.twoSetTemperatureInUnits?.coolTargetTemperatureF != null) {
-    //     sendEvent(name: "coolTargetTemperature", value: data.twoSetTemperatureInUnits.coolTargetTemperatureF)
-    //     sendEvent(name: "coolingSetpoint", value: data.twoSetTemperatureInUnits.coolTargetTemperatureF)
-    // }
-
-    // Process airflow information
-    if (data.airFlow?.windStrength) {
-        def windStrength = cleanEnumValue(data.airFlow.windStrength)
-        sendEvent(name: "windStrength", value: windStrength)
+    if (data.twoSetTemperature?.twoSetEnabled != null) {
+        def twoSet = data.twoSetTemperature.twoSetEnabled ? "enabled" : "disabled"
+        sendEvent(name: "twoSetEnabled", value: twoSet)
     }
 
-    // if (data.airFlow?.windStep != null) {
-    //     sendEvent(name: "windStep", value: data.airFlow.windStep)
-    // }
+    if (data.twoSetTemperatureInUnits) {
+        def twoSetEntry = null
+        if (data.twoSetTemperatureInUnits instanceof List) {
+            def preferredUnit = isFahrenheit ? "F" : "C"
+            twoSetEntry = data.twoSetTemperatureInUnits.find { it.unit == preferredUnit } ?: data.twoSetTemperatureInUnits[0]
+        }
+        else {
+            twoSetEntry = data.twoSetTemperatureInUnits
+        }
+
+        if (twoSetEntry?.heatTargetTemperature != null) {
+            sendEvent(name: "heatTargetTemperature", value: twoSetEntry.heatTargetTemperature, unit: twoSetEntry.unit)
+            sendEvent(name: "heatingSetpoint", value: twoSetEntry.heatTargetTemperature, unit: twoSetEntry.unit)
+        }
+
+        if (twoSetEntry?.coolTargetTemperature != null) {
+            sendEvent(name: "coolTargetTemperature", value: twoSetEntry.coolTargetTemperature, unit: twoSetEntry.unit)
+            sendEvent(name: "coolingSetpoint", value: twoSetEntry.coolTargetTemperature, unit: twoSetEntry.unit)
+        }
+    }
+
+    // Process airflow information
+    if (data.airFlow) {
+        def windKey = data.airFlow.windStrengthDetail != null ? "windStrengthDetail" : (data.airFlow.windStrength != null ? "windStrength" : null)
+        if (windKey) {
+            updateDataValue("windStrengthKey", windKey)
+        }
+
+        def wind = data.airFlow.windStrength ?: data.airFlow.windStrengthDetail
+        if (wind) {
+            def windStrength = cleanEnumValue(wind)
+            sendEvent(name: "windStrength", value: windStrength)
+        }
+    }
+
+    if (data.airFlow?.windStep != null) {
+        sendEvent(name: "windStep", value: data.airFlow.windStep)
+    }
 
     // Process wind direction
-    // if (data.windDirection?.rotateUpDown != null) {
-    //     def rotateUpDown = data.windDirection.rotateUpDown ? "enabled" : "disabled"
-    //     sendEvent(name: "rotateUpDown", value: rotateUpDown)
-    // }
+    if (data.windDirection?.rotateUpDown != null) {
+        def rotateUpDown = data.windDirection.rotateUpDown ? "enabled" : "disabled"
+        sendEvent(name: "rotateUpDown", value: rotateUpDown)
+    }
 
-    // if (data.windDirection?.rotateLeftRight != null) {
-    //     def rotateLeftRight = data.windDirection.rotateLeftRight ? "enabled" : "disabled"
-    //     sendEvent(name: "rotateLeftRight", value: rotateLeftRight)
-    // }
+    if (data.windDirection?.rotateLeftRight != null) {
+        def rotateLeftRight = data.windDirection.rotateLeftRight ? "enabled" : "disabled"
+        sendEvent(name: "rotateLeftRight", value: rotateLeftRight)
+    }
 
-    // Process display light
-    // if (data.display?.light != null) {
-    //     def light = data.display.light ? "on" : "off"
-    //     sendEvent(name: "light", value: light)
-    // }
+    if (data.display?.light != null) {
+        def light = data.display.light ? "on" : "off"
+        sendEvent(name: "light", value: light)
+    }
 
-    // Process power save
-    // if (data.powerSave?.powerSaveEnabled != null) {
-    //     def powerSave = data.powerSave.powerSaveEnabled ? "enabled" : "disabled"
-    //     sendEvent(name: "powerSaveEnabled", value: powerSave)
-    // }
+    if (data.powerSave?.powerSaveEnabled != null) {
+        def powerSave = data.powerSave.powerSaveEnabled ? "enabled" : "disabled"
+        sendEvent(name: "powerSaveEnabled", value: powerSave)
+    }
 
     // Process timer information
     if (data.timer?.relativeHourToStart != null) {
@@ -336,63 +360,63 @@ def processStateData(data) {
     if (data.timer?.relativeMinuteToStop != null) {
         sendEvent(name: "relativeMinuteToStop", value: data.timer.relativeMinuteToStop)
     }
-    // if (data.timer?.absoluteHourToStart != null) {
-    //     sendEvent(name: "absoluteHourToStart", value: data.timer.absoluteHourToStart)
-    // }
-    // if (data.timer?.absoluteMinuteToStart != null) {
-    //     sendEvent(name: "absoluteMinuteToStart", value: data.timer.absoluteMinuteToStart)
-    // }
-    // if (data.timer?.absoluteHourToStop != null) {
-    //     sendEvent(name: "absoluteHourToStop", value: data.timer.absoluteHourToStop)
-    // }
-    // if (data.timer?.absoluteMinuteToStop != null) {
-    //     sendEvent(name: "absoluteMinuteToStop", value: data.timer.absoluteMinuteToStop)
-    // }
+    if (data.timer?.absoluteHourToStart != null) {
+        sendEvent(name: "absoluteHourToStart", value: data.timer.absoluteHourToStart)
+    }
+    if (data.timer?.absoluteMinuteToStart != null) {
+        sendEvent(name: "absoluteMinuteToStart", value: data.timer.absoluteMinuteToStart)
+    }
+    if (data.timer?.absoluteHourToStop != null) {
+        sendEvent(name: "absoluteHourToStop", value: data.timer.absoluteHourToStop)
+    }
+    if (data.timer?.absoluteMinuteToStop != null) {
+        sendEvent(name: "absoluteMinuteToStop", value: data.timer.absoluteMinuteToStop)
+    }
 
     // Process sleep timer
-    // if (data.sleepTimer?.relativeHourToStop != null) {
-    //     sendEvent(name: "sleepRelativeHourToStop", value: data.sleepTimer.relativeHourToStop)
-    // }
-    // if (data.sleepTimer?.relativeMinuteToStop != null) {
-    //     sendEvent(name: "sleepRelativeMinuteToStop", value: data.sleepTimer.relativeMinuteToStop)
-    // }
+    if (data.sleepTimer?.relativeHourToStop != null) {
+        sendEvent(name: "sleepRelativeHourToStop", value: data.sleepTimer.relativeHourToStop)
+    }
+    if (data.sleepTimer?.relativeMinuteToStop != null) {
+        sendEvent(name: "sleepRelativeMinuteToStop", value: data.sleepTimer.relativeMinuteToStop)
+    }
 
     // Process air quality sensor data
-    // if (data.airQualitySensor?.monitoringEnabled != null) {
-    //     def monitoring = data.airQualitySensor.monitoringEnabled ? "enabled" : "disabled"
-    //     sendEvent(name: "airQualityMonitoringEnabled", value: monitoring)
-    // }
+    if (data.airQualitySensor?.monitoringEnabled != null) {
+        def monitoring = data.airQualitySensor.monitoringEnabled ? "enabled" : "disabled"
+        sendEvent(name: "airQualityMonitoringEnabled", value: monitoring)
+    }
 
-    // if (data.airQualitySensor?.PM1 != null) {
-    //     sendEvent(name: "pm1", value: data.airQualitySensor.PM1)
-    // }
+    if (data.airQualitySensor?.PM1 != null) {
+        sendEvent(name: "pm1", value: data.airQualitySensor.PM1)
+    }
 
-    // if (data.airQualitySensor?.PM2 != null) {
-    //     sendEvent(name: "pm2", value: data.airQualitySensor.PM2)
-    // }
+    if (data.airQualitySensor?.PM2 != null) {
+        sendEvent(name: "pm2", value: data.airQualitySensor.PM2)
+    }
 
-    // if (data.airQualitySensor?.PM10 != null) {
-    //     sendEvent(name: "pm10", value: data.airQualitySensor.PM10)
-    // }
+    if (data.airQualitySensor?.PM10 != null) {
+        sendEvent(name: "pm10", value: data.airQualitySensor.PM10)
+    }
 
-    // if (data.airQualitySensor?.odorLevel) {
-    //     def odorLevel = cleanEnumValue(data.airQualitySensor.odorLevel)
-    //     sendEvent(name: "odorLevel", value: odorLevel)
-    // }
+    if (data.airQualitySensor?.odorLevel) {
+        def odorLevel = cleanEnumValue(data.airQualitySensor.odorLevel)
+        sendEvent(name: "odorLevel", value: odorLevel)
+    }
 
-    // if (data.airQualitySensor?.humidity != null) {
-    //     sendEvent(name: "humidity", value: data.airQualitySensor.humidity, unit: "%")
-    // }
+    if (data.airQualitySensor?.humidity != null) {
+        sendEvent(name: "humidity", value: data.airQualitySensor.humidity, unit: "%")
+    }
 
-    // if (data.airQualitySensor?.totalPollutionLevel) {
-    //     def pollutionLevel = cleanEnumValue(data.airQualitySensor.totalPollutionLevel)
-    //     sendEvent(name: "totalPollutionLevel", value: pollutionLevel)
-    // }
+    if (data.airQualitySensor?.totalPollutionLevel) {
+        def pollutionLevel = cleanEnumValue(data.airQualitySensor.totalPollutionLevel)
+        sendEvent(name: "totalPollutionLevel", value: pollutionLevel)
+    }
 
     // Process filter information
-    // if (data.filterInfo?.filterRemainPercent != null) {
-    //     sendEvent(name: "filterRemainPercent", value: data.filterInfo.filterRemainPercent, unit: "%")
-    // }
+    if (data.filterInfo?.filterRemainPercent != null) {
+        sendEvent(name: "filterRemainPercent", value: data.filterInfo.filterRemainPercent, unit: "%")
+    }
 
     if (data.filterInfo?.usedTime != null) {
         sendEvent(name: "filterUsedTime", value: data.filterInfo.usedTime, unit: "hours")
@@ -477,42 +501,43 @@ def setAirConJobMode(mode) {
     parent.sendDeviceCommand(deviceId, command)
 }
 
-// def setAirCleanOperationMode(mode) {
-//     logger("debug", "setAirCleanOperationMode(${mode})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         operation: [
-//             airCleanOperationMode: mode
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setAirCleanOperationMode(mode) {
+    logger("debug", "setAirCleanOperationMode(${mode})")
+    def deviceId = getDeviceId()
+    def command = [
+        operation: [
+            airCleanOperationMode: mode
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setTargetTemperature(temperature) {
-//     logger("debug", "setTargetTemperature(${temperature})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         temperatureInUnits: [
-//             coolTargetTemperature: temperature,
-//             unit: isFahrenheit ? "F" : "C"
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setTargetTemperature(temperature) {
+    logger("debug", "setTargetTemperature(${temperature})")
+    def deviceId = getDeviceId()
+    def command = [
+        temperatureInUnits: [
+            targetTemperature: temperature,
+            unit: isFahrenheit ? "F" : "C"
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setHeatTargetTemperature(temperature) {
-//     logger("debug", "setHeatTargetTemperature(${temperature})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         twoSetTemperatureInUnits: [
-//             heatTargetTemperatureC: temperature
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setHeatTargetTemperature(temperature) {
+    logger("debug", "setHeatTargetTemperature(${temperature})")
+    def deviceId = getDeviceId()
+    def command = [
+        temperatureInUnits: [
+            heatTargetTemperature: temperature,
+            unit: isFahrenheit ? "F" : "C"
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-def setCoolingSetpoint(temperature) {
-    logger("debug", "setCoolingSetpoint(${temperature})")
+def setCoolTargetTemperature(temperature) {
+    logger("debug", "setCoolTargetTemperature(${temperature})")
     def deviceId = getDeviceId()
     def command = [
         temperatureInUnits: [
@@ -523,82 +548,89 @@ def setCoolingSetpoint(temperature) {
     parent.sendDeviceCommand(deviceId, command)
 }
 
+def setCoolingSetpoint(temperature) {
+    logger("debug", "setCoolingSetpoint(${temperature})")
+    // Thermostat cooling setpoint maps to single-set target temperature
+    setTargetTemperature(temperature)
+}
+
 def setWindStrength(strength) {
     logger("debug", "setWindStrength(${strength})")
     def deviceId = getDeviceId()
+    def windKey = getDataValue("windStrengthKey") ?: "windStrength"
     def command = [
         airFlow: [
-            windStrength: strength
+            (windKey): strength
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
 }
 
-// def setWindStep(step) {
-//     logger("debug", "setWindStep(${step})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         airFlow: [
-//             windStep: step
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setWindStep(step) {
+    logger("debug", "setWindStep(${step})")
+    def deviceId = getDeviceId()
+    def command = [
+        airFlow: [
+            windStep: step
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setRotateUpDown(enabled) {
-//     logger("debug", "setRotateUpDown(${enabled})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         windDirection: [
-//             rotateUpDown: enabled == "enabled" || enabled == true
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setRotateUpDown(enabled) {
+    logger("debug", "setRotateUpDown(${enabled})")
+    def deviceId = getDeviceId()
+    def command = [
+        windDirection: [
+            rotateUpDown: toBooleanValue(enabled)
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setRotateLeftRight(enabled) {
-//     logger("debug", "setRotateLeftRight(${enabled})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         windDirection: [
-//             rotateLeftRight: enabled == "enabled" || enabled == true
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setRotateLeftRight(enabled) {
+    logger("debug", "setRotateLeftRight(${enabled})")
+    def deviceId = getDeviceId()
+    def command = [
+        windDirection: [
+            rotateLeftRight: toBooleanValue(enabled)
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setLight(state) {
-//     logger("debug", "setLight(${state})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         display: [
-//             light: state == "on" || state == true
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setLight(state) {
+    logger("debug", "setLight(${state})")
+    def deviceId = getDeviceId()
+    def command = [
+        display: [
+            light: state
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setPowerSave(enabled) {
-//     logger("debug", "setPowerSave(${enabled})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         powerSave: [
-//             powerSaveEnabled: enabled == "enabled" || enabled == true
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setPowerSave(enabled) {
+    logger("debug", "setPowerSave(${enabled})")
+    def deviceId = getDeviceId()
+    def command = [
+        powerSave: [
+            powerSaveEnabled: toBooleanValue(enabled)
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
-// def setTwoSetEnabled(enabled) {
-//     logger("debug", "setTwoSetEnabled(${enabled})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         twoSetTemperature: [
-//             twoSetEnabled: enabled == "enabled" || enabled == true
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setTwoSetEnabled(enabled) {
+    logger("debug", "setTwoSetEnabled(${enabled})")
+    def deviceId = getDeviceId()
+    def command = [
+        twoSetTemperature: [
+            twoSetEnabled: toBooleanValue(enabled)
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
 def setDelayStart(minutes) {
     logger("debug", "setDelayStart(${minutes})")
@@ -606,8 +638,7 @@ def setDelayStart(minutes) {
     def command = [
         timer: [
             relativeHourToStart: minutes.intdiv(60),
-            relativeMinuteToStart: minutes % 60,
-            relativeStartTimer: "SET"
+            relativeMinuteToStart: minutes % 60
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
@@ -619,8 +650,7 @@ def setDelayStop(minutes) {
     def command = [
         timer: [
             relativeHourToStop: minutes.intdiv(60),
-            relativeMinuteToStop: minutes % 60,
-            relativeStartTimer: "SET"
+            relativeMinuteToStop: minutes % 60
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
@@ -631,7 +661,8 @@ def unsetStopTimer() {
     def deviceId = getDeviceId()
     def command = [
         timer: [
-            relativeStartTimer: "UNSET"
+            relativeHourToStop: 0,
+            relativeMinuteToStop: 0
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
@@ -642,23 +673,24 @@ def unsetStartTimer() {
     def deviceId = getDeviceId()
     def command = [
         timer: [
-            relativeStartTimer: "UNSET"
+            relativeHourToStart: 0,
+            relativeMinuteToStart: 0
         ]
     ]
     parent.sendDeviceCommand(deviceId, command)
 }
 
-// def setAbsoluteStart(hour, minute) {
-//     logger("debug", "setAbsoluteStart(${hour}, ${minute})")
-//     def deviceId = getDeviceId()
-//     def command = [
-//         timer: [
-//             absoluteHourToStart: hour,
-//             absoluteMinuteToStart: minute
-//         ]
-//     ]
-//     parent.sendDeviceCommand(deviceId, command)
-// }
+def setAbsoluteStart(hour, minute) {
+    logger("debug", "setAbsoluteStart(${hour}, ${minute})")
+    def deviceId = getDeviceId()
+    def command = [
+        timer: [
+            absoluteHourToStart: hour,
+            absoluteMinuteToStart: minute
+        ]
+    ]
+    parent.sendDeviceCommand(deviceId, command)
+}
 
 def getDeviceId() {
     return device.deviceNetworkId.replace("thinqconnect:", "")
@@ -689,6 +721,14 @@ def convertSecondsToTime(int sec) {
     long minutes = (sec % 3600) / 60
     
     return String.format("%02d:%02d", hours, minutes)
+}
+
+private Boolean toBooleanValue(value) {
+    if (value instanceof Boolean) return value
+    if (value == null) return false
+
+    def normalized = value.toString().trim().toLowerCase()
+    return normalized in ["true", "on", "enabled", "yes", "1", "set"]
 }
 
 /**
