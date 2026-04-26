@@ -159,6 +159,7 @@ def processStateData(data) {
     if (data.runState?.currentState) {
         // def currentState = cleanEnumValue(data.runState.currentState)
         def currentState = data.runState.currentState
+        def previousState = device.currentValue("currentState")
         sendEvent(name: "currentState", value: currentState)
         
         def switchState = (currentState =~ /(?i)power_off|standby/ ? 'off' : 'on')
@@ -166,6 +167,16 @@ def processStateData(data) {
         
         if (logDescText) {
             log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
+        }
+
+        // When a program starts running, MQTT only sends a partial timer update (e.g. remainMinute
+        // only, no remainHour), causing incorrect remainingTime calculation. Schedule a REST refresh
+        // to pull the full timer data shortly after the state transition into a running state.
+        def isNowRunning = !(currentState =~ /(?i)power_off|standby|end|error|pause/)
+        def wasRunning = previousState ? !(previousState =~ /(?i)power_off|standby|end|error|pause/) : false
+        if (isNowRunning && !wasRunning) {
+            logger("info", "Program started, scheduling refresh to get complete timer data")
+            runIn(5, "refresh")
         }
     }
 
