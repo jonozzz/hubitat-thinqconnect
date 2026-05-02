@@ -203,7 +203,6 @@ def prefMQTTClient() {
                         state.clientCertificate = mqttResult.certificate
                         state.pk_sig = pk_sig
                     } else {
-                        // paragraph "Try again in 1-2 minutes"
                         paragraph "❌ MQTT setup failed: ${mqttResult.error}"
                     }
                 } else {
@@ -238,7 +237,7 @@ def prefDevices() {
                 name: device.deviceInfo.alias,
                 type: device.deviceInfo.deviceType,
                 modelName: device.deviceInfo.modelName,
-                reportable: device.deviceInforeportable
+                reportable: device.deviceInfo.reportable
             ]
         }
     }
@@ -291,31 +290,78 @@ def initialize() {
         def deviceDetails = state.foundDevices.find { it.id == deviceId }
         if (!deviceDetails) continue
         
-        def driverName = getDriverName(deviceDetails.type)
-        if (!driverName) continue
-        
-        def childDevice = getChildDevice("thinqconnect:${deviceDetails.id}")
-        if (childDevice == null) {
-            childDevice = addChildDevice("jonozzz", driverName, "thinqconnect:${deviceDetails.id}", 1234, 
-                ["name": deviceDetails.name, isComponent: false])
+        // Handle WashTower as a special case - create both washer and dryer child devices
+        if (deviceDetails.type == "DEVICE_WASHTOWER") {
+            createWashTowerDevices(deviceDetails)
+        } else {
+            def driverName = getDriverName(deviceDetails.type)
+            if (!driverName) continue
             
-            // Set the first device as master for MQTT
-            if (!findMasterDevice()) {
-                childDevice.updateDataValue("master", "true")
-            } else {
-                childDevice.updateDataValue("master", "false")
+            def childDevice = getChildDevice("thinqconnect:${deviceDetails.id}")
+            if (childDevice == null) {
+                childDevice = addChildDevice("jonozzz", driverName, "thinqconnect:${deviceDetails.id}", 1234, 
+                    ["name": deviceDetails.name, isComponent: false])
+                
+                // Set the first device as master for MQTT
+                if (!findMasterDevice()) {
+                    childDevice.updateDataValue("master", "true")
+                } else {
+                    childDevice.updateDataValue("master", "false")
+                }
             }
+            
+            // Initialize device with current status
+            getDeviceStatus(deviceDetails, childDevice)
         }
-        
-        // Initialize device with current status
-        getDeviceStatus(deviceDetails, childDevice)
     }
     
     // Register for push notifications
     registerPushNotifications()
     
-    // Schedule periodic refresh, every Monday at 3am
-    schedule("0 0 3 ? * MON", refreshDevices)
+    // Schedule periodic refresh every 5 minutes to catch updates
+    schedule("0 */5 * * * ?", refreshDevices)
+    
+    // Re-register event subscriptions every 6 days (before 7 day expiry)
+    schedule("0 0 2 ? * *", registerPushNotifications)
+}
+
+def createWashTowerDevices(deviceDetails) {
+    logger("debug", "createWashTowerDevices(${deviceDetails})")
+    
+    // Create washer component
+    def washerDni = "thinqconnect:${deviceDetails.id}:washer"
+    def washerDevice = getChildDevice(washerDni)
+    if (washerDevice == null) {
+        washerDevice = addChildDevice("jonozzz", "ThinQ Connect Washer", washerDni, 1234,
+            ["name": "${deviceDetails.name} - Washer", isComponent: false])
+        
+        // Store the parent device ID for status updates
+        washerDevice.updateDataValue("parentDeviceId", deviceDetails.id)
+        washerDevice.updateDataValue("component", "washer")
+        
+        // Set the first device as master for MQTT
+        if (!findMasterDevice()) {
+            washerDevice.updateDataValue("master", "true")
+        } else {
+            washerDevice.updateDataValue("master", "false")
+        }
+    }
+    
+    // Create dryer component
+    def dryerDni = "thinqconnect:${deviceDetails.id}:dryer"
+    def dryerDevice = getChildDevice(dryerDni)
+    if (dryerDevice == null) {
+        dryerDevice = addChildDevice("jonozzz", "ThinQ Connect Dryer", dryerDni, 1234,
+            ["name": "${deviceDetails.name} - Dryer", isComponent: false])
+        
+        // Store the parent device ID for status updates
+        dryerDevice.updateDataValue("parentDeviceId", deviceDetails.id)
+        dryerDevice.updateDataValue("component", "dryer")
+        dryerDevice.updateDataValue("master", "false")
+    }
+    
+    // Initialize both devices with current status
+    getWashTowerStatus(deviceDetails, washerDevice, dryerDevice)
 }
 
 def getDriverName(deviceType) {
@@ -340,6 +386,9 @@ def getDriverName(deviceType) {
             return "ThinQ Connect Microwave Oven"
         case "DEVICE_AIR_CONDITIONER":
             return "ThinQ Connect Air Conditioner"
+        case "DEVICE_WASHTOWER":
+            // WashTower is handled specially in initialize()
+            return null
         default:
             return null
     }
@@ -454,6 +503,27 @@ def getDeviceStatus(deviceDetails, childDevice) {
     return status
 }
 
+def getWashTowerStatus(deviceDetails, washerDevice, dryerDevice) {
+    logger("debug", "getWashTowerStatus(${deviceDetails.id})")
+    
+    def status = apiGet("/devices/${deviceDetails.id}/state")
+
+    if (status != null) {
+        // Process washer state - wrap in the expected structure
+        if (status.washer && washerDevice) {
+            def washerState = [washer: status.washer]
+            washerDevice.processStateData(washerState)
+        }
+        
+        // Process dryer state - wrap in the expected structure
+        if (status.dryer && dryerDevice) {
+            def dryerState = [dryer: status.dryer]
+            dryerDevice.processStateData(dryerState)
+        }
+    }
+    return status
+}
+
 def getDeviceState(deviceId) {
     return apiGet("/devices/${deviceId}/state")
 }
@@ -463,8 +533,9 @@ def registerPushNotifications() {
     
     for (deviceId in selectedDevices) {
         try {
-            //apiPost("/push/${deviceId}/subscribe", [:])
-            apiPost("/event/${deviceId}/subscribe", [expire: [unit: "HOUR", timer: 4464]])
+            // Subscribe to events with 7 day expiry (168 hours)
+            def result = apiPost("/event/${deviceId}/subscribe", [expire: [unit: "HOUR", timer: 168]])
+            logger("info", "Registered event notifications for device ${deviceId}: ${result}")
         } catch (Exception e) {
             logger("warn", "Failed to register notifications for device ${deviceId}: ${e}")
         }
@@ -476,9 +547,20 @@ def refreshDevices() {
     
     for (deviceId in selectedDevices) {
         def deviceDetails = state.foundDevices.find { it.id == deviceId }
-        def childDevice = getChildDevice("thinqconnect:${deviceId}")
-        if (deviceDetails && childDevice) {
-            getDeviceStatus(deviceDetails, childDevice)
+        
+        if (deviceDetails?.type == "DEVICE_WASHTOWER") {
+            // Refresh WashTower components
+            def washerDevice = getChildDevice("thinqconnect:${deviceId}:washer")
+            def dryerDevice = getChildDevice("thinqconnect:${deviceId}:dryer")
+            if (deviceDetails && washerDevice && dryerDevice) {
+                getWashTowerStatus(deviceDetails, washerDevice, dryerDevice)
+            }
+        } else {
+            // Refresh regular device
+            def childDevice = getChildDevice("thinqconnect:${deviceId}")
+            if (deviceDetails && childDevice) {
+                getDeviceStatus(deviceDetails, childDevice)
+            }
         }
     }
 }
@@ -488,6 +570,7 @@ def apiGet(endpoint) {
     
     def headers = getApiHeaders()
     def uri = "${state.apiBase}${endpoint}"
+    def result = null
     
     try {
         httpGet([
@@ -503,7 +586,7 @@ def apiGet(endpoint) {
                 result = null
             }
         }
-        logger("debug", "apiGet(${endpoint}, ${result})")
+        logger("debug", "apiGet(${endpoint}) result: ${result}")
         return result
     } catch (Exception e) {
         logger("error", "API GET exception: ${e}")
@@ -516,6 +599,7 @@ def apiPost(endpoint, body) {
     
     def headers = getApiHeaders()
     def uri = "${state.apiBase}${endpoint}"
+    def result = null
     
     try {
         httpPost([
@@ -568,10 +652,12 @@ def cleanupChildDevices() {
 
     for (d in getChildDevices()) {
         def deviceId = d.deviceNetworkId.replace("thinqconnect:", "")
-
+        // Handle WashTower component devices
+        def parentDeviceId = deviceId.split(":")[0]
+        
         def deviceFound = false
         for (dev in selectedDevices) {
-            if (dev == deviceId) {
+            if (dev == deviceId || dev == parentDeviceId) {
                 deviceFound = true
                 break
             }
@@ -610,9 +696,32 @@ def processMqttMessage(dev, payload) {
 
     switch (payload.pushType) {
         case "DEVICE_STATUS":
-            def targetDevice = getChildDevice("thinqconnect:" + payload.deviceId)
-            if (targetDevice) {
-                targetDevice.processStateData(payload.report)
+            // Check if this is a WashTower device
+            def deviceDetails = state.foundDevices.find { it.id == payload.deviceId }
+            
+            if (deviceDetails?.type == "DEVICE_WASHTOWER") {
+                // Route to appropriate component device - wrap in expected structure
+                if (payload.report?.washer) {
+                    def washerDevice = getChildDevice("thinqconnect:${payload.deviceId}:washer")
+                    if (washerDevice) {
+                        def washerReport = [washer: payload.report.washer]
+                        washerDevice.processStateData(washerReport)
+                    }
+                }
+                
+                if (payload.report?.dryer) {
+                    def dryerDevice = getChildDevice("thinqconnect:${payload.deviceId}:dryer")
+                    if (dryerDevice) {
+                        def dryerReport = [dryer: payload.report.dryer]
+                        dryerDevice.processStateData(dryerReport)
+                    }
+                }
+            } else {
+                // Regular device handling
+                def targetDevice = getChildDevice("thinqconnect:" + payload.deviceId)
+                if (targetDevice) {
+                    targetDevice.processStateData(payload.report)
+                }
             }
             break
         default:
@@ -620,9 +729,20 @@ def processMqttMessage(dev, payload) {
     }
 }
 
-def sendDeviceCommand(deviceId, command) {
-    logger("debug", "sendDeviceCommand(${deviceId}, ${command})")
-    return apiPost("/devices/${deviceId}/control", command)
+def sendDeviceCommand(deviceId, component, command) {
+    logger("debug", "sendDeviceCommand(${deviceId}, ${component}, ${command})")
+    
+    // For WashTower devices, we need to wrap the command with the component
+    def deviceDetails = state.foundDevices.find { it.id == deviceId }
+    
+    if (deviceDetails?.type == "DEVICE_WASHTOWER" && component) {
+        // Wrap command for specific component (washer or dryer)
+        def wrappedCommand = [(component): command]
+        return apiPost("/devices/${deviceId}/control", wrappedCommand)
+    } else {
+        // Regular device command
+        return apiPost("/devices/${deviceId}/control", command)
+    }
 }
 
 /**
