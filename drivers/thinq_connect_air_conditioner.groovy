@@ -74,7 +74,7 @@ metadata {
         command "getDeviceProfile"
         command "setAirConOperationMode", ["string"]
         command "setAirCleanOperationMode", ["string"]
-        command "setAirConJobMode", [[name:"Set AirConJobMode", type: "ENUM", description: "Select AirCon Job Mode", constraints: ["COOL", "ENERGY_SAVING", "AIR_DRY", "FAN"]]]
+        command "setAirConJobMode", [[name:"Set AirConJobMode", type: "ENUM", description: "Select AirCon Job Mode", constraints: ["COOL", "HEAT", "AUTO", "AIR_CLEAN", "ENERGY_SAVING", "AIR_DRY", "FAN"]]]
         command "setTargetTemperature", ["number"]
         command "setHeatTargetTemperature", ["number"]
         command "setCoolTargetTemperature", ["number"]
