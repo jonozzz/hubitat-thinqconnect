@@ -19,8 +19,7 @@ metadata {
         capability "Initialize"
         capability "Refresh"
         capability "TemperatureMeasurement"
-        // capability "ThermostatHeatingSetpoint" // Uncomment if using heatTargetTemperature as heating setpoint
-        capability "ThermostatCoolingSetpoint"
+        capability "Thermostat"
 
         attribute "currentState", "string"
         attribute "currentJobMode", "string"
@@ -78,7 +77,7 @@ metadata {
         command "setTargetTemperature", ["number"]
         command "setHeatTargetTemperature", ["number"]
         command "setCoolTargetTemperature", ["number"]
-        command "setWindStrength", [[name:"Set Wind Strength", type: "ENUM", description: "Select Wind Strength", constraints: ["LOW", "MID", "HIGH"]]]
+        command "setWindStrength", [[name:"Set Wind Strength", type: "ENUM", description: "Select Wind Strength", constraints: ["LOW", "MID", "HIGH", "POWER", "AUTO"]]]
         command "setWindStep", ["number"]
         command "setRotateUpDown", ["string"]
         command "setRotateLeftRight", ["string"]
@@ -205,26 +204,40 @@ def processStateData(data) {
     }
 
     // Process job mode
+    def currentJobModeRaw = null
     if (data.airConJobMode?.currentJobMode) {
-        def jobMode = cleanEnumValue(data.airConJobMode.currentJobMode)
+        currentJobModeRaw = data.airConJobMode.currentJobMode
+        def jobMode = cleanEnumValue(currentJobModeRaw)
         sendEvent(name: "currentJobMode", value: jobMode)
     }
 
     // Process operation modes
+    def airConOpModeRaw = null
     if (data.operation?.airConOperationMode) {
-        def opMode = cleanEnumValue(data.operation.airConOperationMode)
+        airConOpModeRaw = data.operation.airConOperationMode
+        def opMode = cleanEnumValue(airConOpModeRaw)
         sendEvent(name: "airConOperationMode", value: opMode)
     }
 
     // Derive switch state from runState or operation mode
-    if (currentState || data.operation?.airConOperationMode) {
-        def modeText = currentState ?: data.operation?.airConOperationMode ?: ""
-        def switchState = (modeText =~ /(?i)power_off|off/ ? 'off' : 'on')
+    def isPoweredOff = false
+    if (currentState || airConOpModeRaw) {
+        def modeText = currentState ?: airConOpModeRaw ?: ""
+        isPoweredOff = (modeText =~ /(?i)power_off|off/)
+        def switchState = isPoweredOff ? 'off' : 'on'
         sendEvent(name: "switch", value: switchState)
         if (logDescText && currentState) {
             log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
         }
     }
+
+    // Derive thermostatMode from job mode + power state
+    def thermostatMode = lgJobModeToThermostatMode(currentJobModeRaw, isPoweredOff)
+    sendEvent(name: "thermostatMode", value: thermostatMode)
+
+    // Derive thermostatOperatingState
+    def operatingState = isPoweredOff ? "idle" : lgJobModeToOperatingState(currentJobModeRaw)
+    sendEvent(name: "thermostatOperatingState", value: operatingState)
 
     if (data.operation?.airCleanOperationMode) {
         def cleanMode = cleanEnumValue(data.operation.airCleanOperationMode)
@@ -256,6 +269,7 @@ def processStateData(data) {
 
             if (tempEntry.targetTemperature != null) {
                 sendEvent(name: "targetTemperature", value: tempEntry.targetTemperature, unit: tempEntry.unit)
+                sendEvent(name: "thermostatSetpoint", value: tempEntry.targetTemperature, unit: tempEntry.unit)
                 sendEvent(name: "coolingSetpoint", value: tempEntry.targetTemperature, unit: tempEntry.unit)
             }
 
@@ -306,6 +320,13 @@ def processStateData(data) {
             sendEvent(name: "coolTargetTemperature", value: twoSetEntry.coolTargetTemperature, unit: twoSetEntry.unit)
             sendEvent(name: "coolingSetpoint", value: twoSetEntry.coolTargetTemperature, unit: twoSetEntry.unit)
         }
+    } else {
+        // Single-set: sync heatingSetpoint from heatTargetTemperature if already set
+        def heatVal = device.currentValue("heatTargetTemperature")
+        if (heatVal != null) {
+            sendEvent(name: "heatingSetpoint", value: heatVal)
+        }
+    }
     }
 
     // Process airflow information
@@ -319,6 +340,8 @@ def processStateData(data) {
         if (wind) {
             def windStrength = cleanEnumValue(wind)
             sendEvent(name: "windStrength", value: windStrength)
+            // Map to thermostatFanMode
+            sendEvent(name: "thermostatFanMode", value: lgWindStrengthToFanMode(wind))
         }
     }
 
@@ -554,6 +577,55 @@ def setCoolingSetpoint(temperature) {
     setTargetTemperature(temperature)
 }
 
+def setHeatingSetpoint(temperature) {
+    logger("debug", "setHeatingSetpoint(${temperature})")
+    setHeatTargetTemperature(temperature)
+}
+
+def setThermostatMode(mode) {
+    logger("debug", "setThermostatMode(${mode})")
+    switch (mode) {
+        case "off":
+            stop()
+            break
+        case "heat":
+            start()
+            setAirConJobMode("HEAT")
+            break
+        case "cool":
+            start()
+            setAirConJobMode("COOL")
+            break
+        case "auto":
+            start()
+            setAirConJobMode("AUTO")
+            break
+        case "emergency heat":
+            start()
+            setAirConJobMode("HEAT")
+            break
+        default:
+            logger("warn", "setThermostatMode: unknown mode '${mode}'")
+    }
+}
+
+def heat() { setThermostatMode("heat") }
+def cool() { setThermostatMode("cool") }
+def auto() { setThermostatMode("auto") }
+def emergencyHeat() { setThermostatMode("emergency heat") }
+
+def setThermostatFanMode(fanMode) {
+    logger("debug", "setThermostatFanMode(${fanMode})")
+    def strength = hubFanModeToLgWindStrength(fanMode)
+    if (strength) {
+        setWindStrength(strength)
+    }
+}
+
+def fanAuto()      { setThermostatFanMode("auto") }
+def fanCirculate() { setThermostatFanMode("circulate") }
+def fanOn()        { setThermostatFanMode("on") }
+
 def setWindStrength(strength) {
     logger("debug", "setWindStrength(${strength})")
     def deviceId = getDeviceId()
@@ -691,6 +763,59 @@ def setAbsoluteStart(hour, minute) {
     ]
     parent.sendDeviceCommand(deviceId, command)
 }
+
+// ── Thermostat mode helpers ──────────────────────────────────────────────────
+
+private String lgJobModeToThermostatMode(String jobMode, boolean poweredOff) {
+    if (poweredOff || !jobMode) return "off"
+    switch (jobMode.toUpperCase()) {
+        case "HEAT":          return "heat"
+        case "COOL":          return "cool"
+        case "AUTO":          return "auto"
+        case "AIR_DRY":       return "cool"   // closest Hubitat equivalent
+        case "FAN":           return "auto"
+        case "ENERGY_SAVING": return "cool"
+        case "AIR_CLEAN":     return "auto"
+        default:              return "auto"
+    }
+}
+
+private String lgJobModeToOperatingState(String jobMode) {
+    if (!jobMode) return "idle"
+    switch (jobMode.toUpperCase()) {
+        case "HEAT":          return "heating"
+        case "COOL":          return "cooling"
+        case "AUTO":          return "idle"   // unknown without sensor delta
+        case "FAN":           return "fan only"
+        case "AIR_DRY":       return "cooling"
+        case "ENERGY_SAVING": return "cooling"
+        case "AIR_CLEAN":     return "fan only"
+        default:              return "idle"
+    }
+}
+
+private String lgWindStrengthToFanMode(String wind) {
+    if (!wind) return "auto"
+    switch (wind.toUpperCase()) {
+        case "AUTO":  return "auto"
+        case "LOW":   return "circulate"
+        case "MID":   return "on"
+        case "HIGH":  return "on"
+        case "POWER": return "on"
+        default:      return "auto"
+    }
+}
+
+private String hubFanModeToLgWindStrength(String fanMode) {
+    switch (fanMode?.toLowerCase()) {
+        case "auto":      return "AUTO"
+        case "circulate": return "LOW"
+        case "on":        return "MID"
+        default:          return null
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 def getDeviceId() {
     return device.deviceNetworkId.replace("thinqconnect:", "")
