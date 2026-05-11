@@ -327,7 +327,6 @@ def processStateData(data) {
             sendEvent(name: "heatingSetpoint", value: heatVal)
         }
     }
-    }
 
     // Process airflow information
     if (data.airFlow) {
