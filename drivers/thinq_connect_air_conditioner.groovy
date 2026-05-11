@@ -33,6 +33,8 @@ metadata {
         attribute "coolTargetTemperature", "number"
         attribute "temperatureUnit", "string"
         attribute "twoSetEnabled", "string"
+        attribute "supportedThermostatModes", "JSON_OBJECT"
+        attribute "supportedThermostatFanModes", "JSON_OBJECT"
         attribute "windStrength", "string"
         attribute "windStep", "number"
         attribute "rotateUpDown", "string"
@@ -116,6 +118,20 @@ def uninstalled() {
 
 def initialize() {
     logger("debug", "initialize()")
+
+    // Publish supported modes so Thermostat Scheduler (and other apps) never see nulls
+    sendEvent(name: "supportedThermostatModes", value: groovy.json.JsonOutput.toJson(["off", "heat", "cool", "auto", "emergency heat"]))
+    sendEvent(name: "supportedThermostatFanModes", value: groovy.json.JsonOutput.toJson(["auto", "circulate", "on"]))
+    // Seed thermostatMode and thermostatOperatingState with safe defaults if not yet set
+    if (device.currentValue("thermostatMode") == null) {
+        sendEvent(name: "thermostatMode", value: "off")
+    }
+    if (device.currentValue("thermostatOperatingState") == null) {
+        sendEvent(name: "thermostatOperatingState", value: "idle")
+    }
+    if (device.currentValue("thermostatFanMode") == null) {
+        sendEvent(name: "thermostatFanMode", value: "auto")
+    }
 
     if (getDataValue("master") == "true") {
         if (interfaces.mqtt.isConnected())
