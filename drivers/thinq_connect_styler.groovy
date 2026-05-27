@@ -212,14 +212,15 @@ def processStateData(data) {
         sendEvent(name: "finishTimeDisplay", value: "--")
     }
 
-    // 5. 에러 코드
+    // 5. Error state — map known error codes to readable messages
     if (data.error) {
-        sendEvent(name: "error", value: cleanEnumValue(data.error))
-        if (logDescText) log.warn "${device.displayName} Error: ${data.error}"
+        def errorMessage = convertErrorCode(data.error)
+        sendEvent(name: "error", value: errorMessage)
+    if (logDescText) log.warn "${device.displayName} Error: ${errorMessage}"
     } else {
-        // 에러 없으면 clear
         sendEvent(name: "error", value: "none")
     }
+
 }
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────────────────
@@ -244,6 +245,16 @@ def convertSecondsToTime(int sec) {
     long minutes = (sec % 3600) / 60
     return String.format("%02d:%02d", hours, minutes)
 }
+
+// Convert LG API error codes to readable messages
+def convertErrorCode(code) {
+    def errorMap = [
+        "NEED_WATER_REPLENISHMENT" : "Empty Water Tank",
+        "NO_ERROR"                 : "none"
+    ]
+    return errorMap[code] ?: cleanEnumValue(code)
+}
+
 
 private logger(level, msg) {
     if (level && msg) {
