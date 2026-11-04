@@ -664,11 +664,6 @@ def getDeviceId() {
     return device.deviceNetworkId.replace("thinqconnect:", "")
 }
 
-def getDeviceDetails() {
-    def deviceId = getDeviceId()
-    return parent.state.foundDevices.find { it.id == deviceId }
-}
-
 def cleanEnumValue(value) {
     if (value == null) return ""
     return value.toString()

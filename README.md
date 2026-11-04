@@ -13,8 +13,9 @@ This is a new Hubitat integration for LG ThinQ devices using the official LG Thi
 ## Requirements
 
 1. **PAT Token**: You need a Personal Access Token from LG ThinQ Connect portal
-2. **MQTT Certificates**: Client certificate, private key, and CA certificate for MQTT connection
-3. **Supported Devices**: LG appliances that support ThinQ Connect
+2. **Supported Devices**: LG appliances that support ThinQ Connect
+
+The hub creates the private key and certificate request for LG's MQTT service itself.
 
 ## Installation
 
@@ -25,14 +26,14 @@ This is a new Hubitat integration for LG ThinQ devices using the official LG Thi
 
 ### 2. Get Your PAT Token
 
-1. Visit the LG ThinQ Connect portal
-2. Create a new application or use an existing one
-3. Generate a Personal Access Token (PAT)
+1. Open https://connect-pat.lgthinq.com and sign in with the LG account your appliances are in
+2. Under ADD NEW TOKEN, name the token and tick *Permission to view all devices* and *Permission to view all device statuses*; add *All device control rights* to start or stop appliances from Hubitat
+3. Copy the token: LG shows it once
 4. Note your country/region
 
-### 3. Obtain MQTT Certificates
+### 3. Optional: Use Your Own MQTT Key
 
-You need two files, which can be generated locally using `openssl` or online via a service like https://csrgenerator.com/
+The hub creates the key and certificate request during setup. To use your own instead, generate two files locally with `openssl` and paste both on the MQTT page:
 
 - **Private Key**: RSA private key in PEM format  
   Example:  
@@ -45,7 +46,7 @@ You need two files, which can be generated locally using `openssl` or online via
   openssl req -new -nodes -key priv.key -config csrconfig.txt -out cert.csr
   ```
 
-These can be generated once and reused. The certificates are used for secure MQTT communication.
+These can be generated once and reused. The pasted key is stored encrypted.
 
 ### 4. Configure the Integration
 
@@ -54,7 +55,7 @@ These can be generated once and reused. The certificates are used for secure MQT
    - Enter your PAT token
    - Select your country
    - Test the API connection
-   - Provide MQTT certificates
+   - Register the MQTT client (the hub creates the key)
    - Select devices to integrate
 
 ## Supported Devices
@@ -105,7 +106,7 @@ The integration uses these official ThinQ Connect API endpoints:
 | API | Reverse-engineered private API | Official documented API |
 | Reliability | Prone to breaking | Stable official API |
 | Setup Complexity | High (OAuth, CSR generation) | Low (just PAT token) |
-| MQTT Certificates | Auto-generated | User-provided (can be static) |
+| MQTT Certificates | Auto-generated | Created by the hub (or user-provided) |
 
 ## Setup Process
 
@@ -120,8 +121,7 @@ The integration uses these official ThinQ Connect API endpoints:
 
 ### Step 3: MQTT Configuration
 - MQTT server automatically detected from API
-- Enter client certificate request
-- Enter private key
+- The hub creates the private key and certificate request (or paste your own)
 - Register MQTT client
 
 ### Step 4: Device Selection
@@ -164,7 +164,7 @@ The integration processes data from the ThinQ Connect API in this format:
 3. Ensure your devices are registered with LG ThinQ
 
 ### MQTT Issues
-1. Verify CSR format (PEM)
+1. If you pasted your own key, verify the CSR and key format (PEM)
 2. Check that certificates are not expired
 3. Ensure MQTT server URL is correct
 4. The LG API throttles client‑certificate issuance. In practice, requesting no more than one certificate per minute is reliable.
