@@ -55,6 +55,9 @@ metadata {
         section {
             input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: false
             input name: "logDescText", title: "Log Description Text", type: "bool", defaultValue: false, required: false
+            input name: "switchControlsWasher", title: "Switch on/off starts and stops the washer",
+                  description: "Off: the switch only reports whether a cycle is running, so an 'all off' rule or a voice assistant can't stop a wash. The Start and Stop commands work either way.",
+                  type: "bool", defaultValue: false, required: false
         }
     }
 }
@@ -170,14 +173,21 @@ def processStateData(data) {
     // Process current state
     if (data.runState?.currentState) {
         def currentState = data.runState.currentState
+        def previousState = device.currentValue("currentState")
         sendEvent(name: "currentState", value: currentState)
-        
-        def switchState = (currentState =~ /(?i)power_off|pause/ ? 'off' : 'on')
+
+        // switch = a cycle is under way, not merely powered on
+        def switchState = isRunningState(currentState) ? 'on' : 'off'
         sendEvent(name: "switch", value: switchState)
-        
+
         if (logDescText) {
             log.info "${device.displayName} CurrentState: ${currentState}, Switch: ${switchState}"
         }
+
+        // Pushes carry no timestamp and can arrive out of order (RUNNING, then a late INITIAL),
+        // and the one at a state change often has a partial timer. Pull the full state shortly
+        // after each change so a stale or partial push doesn't stand.
+        if (currentState != previousState) runIn(5, "refresh")
     }
 
     // Process operation mode
@@ -192,45 +202,28 @@ def processStateData(data) {
         sendEvent(name: "remoteControlEnabled", value: remoteEnabled)
     }
 
-    if (data.timer?.remainHour != null) {
-      updateDataValue("remainHour", data.timer?.remainHour.toString())
+    // Process timer information. A message carries only the timer fields that changed (often
+    // none), so keep the last value of each field and recompute only when the timer is present:
+    // a missing field is "unchanged", not 0, and 0 is a real value.
+    if (data.timer) {
+        ["remainHour", "remainMinute", "totalHour", "totalMinute"].each { k ->
+            if (data.timer[k] != null) updateDataValue(k, data.timer[k].toString())
+        }
+        int remainingTime = storedTimer("remainHour") * 3600 + storedTimer("remainMinute") * 60
+        int totalTime = storedTimer("totalHour") * 3600 + storedTimer("totalMinute") * 60
+        int runTime = Math.max(totalTime - remainingTime, 0)
+
+        sendEvent(name: "remainingTime", value: remainingTime, unit: "seconds")
+        sendEvent(name: "remainingTimeDisplay", value: convertSecondsToTime(remainingTime))
+        sendEvent(name: "totalTime", value: totalTime, unit: "seconds")
+        sendEvent(name: "totalTimeDisplay", value: convertSecondsToTime(totalTime))
+        sendEvent(name: "runTime", value: runTime, unit: "seconds")
+        sendEvent(name: "runTimeDisplay", value: convertSecondsToTime(runTime))
+
+        logger("debug", "remainingTime: ${remainingTime}")
+
+        updateFinishTime("finishTimeDisplay", remainingTime, data.runState?.currentState ?: device.currentValue("currentState"))
     }
-
-    if (data.timer?.totalHour != null) {
-      updateDataValue("totalHour", data.timer?.totalHour.toString())
-    }
-
-    if (data.timer?.totalMinute != null) {
-      updateDataValue("totalMinute", data.timer?.totalMinute.toString())
-    }
-
-    // Process timer information
-    def remainHour = data.timer?.remainHour ?: getDataValue("remainHour").toInteger() ?: 0
-    def remainMinute = data.timer?.remainMinute ?: 0
-    def totalHour = data.timer?.totalHour ?: getDataValue("totalHour").toInteger() ?: 0
-    def totalMinute = data.timer?.totalMinute ?: getDataValue("totalMinute").toInteger() ?: 0
-
-    def remainingTime = (remainHour * 3600) + (remainMinute * 60)
-    def totalTime = (totalHour * 3600) + (totalMinute * 60)
-    def runTime = totalTime - remainingTime
-
-    sendEvent(name: "remainingTime", value: remainingTime, unit: "seconds")
-    sendEvent(name: "remainingTimeDisplay", value: convertSecondsToTime(remainingTime))
-    sendEvent(name: "totalTime", value: totalTime, unit: "seconds")
-    sendEvent(name: "totalTimeDisplay", value: convertSecondsToTime(totalTime))
-    sendEvent(name: "runTime", value: runTime, unit: "seconds")
-    sendEvent(name: "runTimeDisplay", value: convertSecondsToTime(runTime))
-
-    logger("debug", "remainingTime: ${remainingTime}")
-
-
-    // Calculate finish time
-    Date currentTime = new Date()
-    use(groovy.time.TimeCategory) {
-        currentTime = currentTime + (remainingTime as int).seconds
-    }
-    def finishTimeDisplay = currentTime.format("yyyy-MM-dd'T'HH:mm:ssZ", location.timeZone)
-    sendEvent(name: "finishTimeDisplay", value: finishTimeDisplay)
 
     // Process delay timer
     if (data.timer?.relativeHourToStart != null) {
@@ -307,10 +300,18 @@ def powerOff() {
 }
 
 def on() {
+    if (!switchControlsWasher) {
+        logger("warn", "on() ignored: 'Switch on/off starts and stops the washer' is off; use the Start command")
+        return
+    }
     start()
 }
 
 def off() {
+    if (!switchControlsWasher) {
+        logger("warn", "off() ignored: 'Switch on/off starts and stops the washer' is off; use the Stop command")
+        return
+    }
     stop()
 }
 
@@ -332,6 +333,17 @@ def getDeviceId() {
 def getDeviceDetails() {
     def deviceId = getDeviceId()
     return parent.state.foundDevices.find { it.id == deviceId }
+}
+
+// Powered on but idle, paused, finished, waiting for a delayed start or in error: not running.
+// Anything else (DETECTING, RUNNING, RINSING, SPINNING, ...) is part of a cycle.
+boolean isRunningState(state) {
+    return state != null && !(state.toString() ==~ /(?i)(power_off|initial|pause|end|error|reserved|sleep)/)
+}
+
+int storedTimer(String key) {
+    def v = getDataValue(key)
+    return v?.isInteger() ? v.toInteger() : 0
 }
 
 def cleanEnumValue(value) {
@@ -371,4 +383,19 @@ private logger(level, msg) {
             log."${level}" "${device.displayName} ${msg}"
         }
     }
+}
+
+// finishTime = now + remaining, so every message moves it by a few seconds and each refresh of an
+// idle appliance logged a new "now". Send it only while a cycle runs (an idle appliance can keep a
+// stale remaining minute), and only when it moves by more than 90 s; it keeps the last cycle's time.
+private void updateFinishTime(String attr, int remainingTime, runState) {
+    if (remainingTime <= 0 || !isRunningState(runState)) return
+    long finish = now() + remainingTime * 1000L
+    String current = device.currentValue(attr)
+    if (current) {
+        try {
+            if (Math.abs(finish - Date.parse("yyyy-MM-dd'T'HH:mm:ssZ", current).time) < 90000L) return
+        } catch (Exception ignored) { }   // an unparseable old value is replaced
+    }
+    sendEvent(name: attr, value: new Date(finish).format("yyyy-MM-dd'T'HH:mm:ssZ", location.timeZone))
 }
