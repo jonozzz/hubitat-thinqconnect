@@ -44,6 +44,9 @@ metadata {
         section {
             input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: false
             input name: "logDescText", title: "Log Description Text", type: "bool", defaultValue: false, required: false
+            input name: "switchControlsMicrowave", title: "Switch on/off starts and stops the microwave",
+                  description: "Off: the switch only reports state, so an 'all off' rule or a voice assistant can't stop a cycle. The Start and Stop commands work either way.",
+                  type: "bool", defaultValue: false, required: false
         }
     }
 }
@@ -94,6 +97,9 @@ def mqttConnectUntilSuccessful() {
     logger("debug", "mqttConnectUntilSuccessful()")
 
     try {
+        // A retry can find a half-open connection (e.g. connect worked, subscribe failed)
+        if (interfaces.mqtt.isConnected()) interfaces.mqtt.disconnect()
+
         def mqtt = parent.retrieveMqttDetails()
 
         interfaces.mqtt.connect(mqtt.server,
@@ -104,8 +110,7 @@ def mqttConnectUntilSuccessful() {
                                 privateKey: mqtt.privateKey,
                                 caCertificate: mqtt.caCertificate,
                                 clientCertificate: mqtt.certificate,
-                                cleanSession: true,
-                                ignoreSSLIssues: true)
+                                cleanSession: true)
         pauseExecution(3000)
         for (sub in mqtt.subscriptions) {
             interfaces.mqtt.subscribe(sub)
@@ -113,10 +118,20 @@ def mqttConnectUntilSuccessful() {
         return true
     }
     catch (e) {
-        logger("warn", "Lost connection to MQTT, retrying in 15 seconds ${e}")
-        runIn(15, "mqttConnectUntilSuccessful")
+        scheduleMqttRetry("connect failed: ${e}")
         return false
     }
+}
+
+// Retry 15 s after a failure, doubling up to 10 min; a successful connection resets it.
+// A broker that accepts and then drops the connection would otherwise loop every few seconds.
+void scheduleMqttRetry(String why) {
+    int n = (state.mqttRetries ?: 0) as int
+    int delay = Math.min(15 * (1 << Math.min(n, 6)), 600)
+    state.mqttRetries = n + 1
+    // One drop usually heals on the first retry; only a run of failures is an error
+    logger(n >= 3 ? "error" : "warn", "MQTT ${why}; retrying in ${delay} s")
+    runIn(delay, "mqttConnectUntilSuccessful")
 }
 
 def parse(message) {
@@ -132,14 +147,15 @@ def mqttClientStatus(String message) {
     logger("debug", "mqttClientStatus(${message})")
 
     if (message.startsWith("Error:")) {
-        logger("error", "MQTT Error: ${message}")
-
         try {
             interfaces.mqtt.disconnect()
         }
         catch (e) {
         }
-        mqttConnectUntilSuccessful()
+        scheduleMqttRetry(message)
+    } else if (message.contains("Connection succeeded")) {
+        state.mqttRetries = 0
+        unschedule("mqttConnectUntilSuccessful")   // a retry still pending would drop this connection
     }
 }
 
@@ -147,13 +163,9 @@ def processStateData(data) {
     logger("debug", "processStateData(${data})")
     checkVersion()
 
+    // REST answers a list for some appliances and a map for others; a failed REST call hands us null.
+    if (data instanceof List) data = data ? data[0] : null
     if (!data) return
-
-    // Normalize payload – API may return a Map or a List with one Map entry
-    if (data instanceof List) {
-        if (data.isEmpty()) return
-        data = data[0]
-    }
     if (!(data instanceof Map)) return
 
     def runState = getResourceEntry(data.runState)
@@ -181,13 +193,18 @@ def processStateData(data) {
         sendEvent(name: "remoteControlEnabled", value: remoteEnabled)
     }
 
-    // Process timer information
-    def remainMinute = timer?.remainMinute ?: 0
-    def remainSecond = timer?.remainSecond ?: 0
-    def remainingTime = (remainMinute * 60) + remainSecond
+    // Process timer information. A message carries only the timer fields that changed, so keep
+    // the last value of each field and recompute only when the timer is present: a missing
+    // field is "unchanged", not 0. The microwave timer has no hours.
+    if (timer) {
+        ["remainMinute", "remainSecond"].each { k ->
+            if (timer[k] != null) updateDataValue(k, timer[k].toString())
+        }
+        int remainingTime = storedTimer("remainMinute") * 60 + storedTimer("remainSecond")
 
-    sendEvent(name: "remainingTime", value: remainingTime, unit: "seconds")
-    sendEvent(name: "remainingTimeDisplay", value: convertSecondsToTime(remainingTime))
+        sendEvent(name: "remainingTime", value: remainingTime, unit: "seconds")
+        sendEvent(name: "remainingTimeDisplay", value: convertSecondsToTime(remainingTime))
+    }
 
     // Process ventilation fan speed
     if (ventilation?.fanSpeed != null) {
@@ -240,10 +257,18 @@ def powerOff() {
 }
 
 def on() {
+    if (!switchControlsMicrowave) {
+        logger("warn", "on() ignored: 'Switch on/off starts and stops the microwave' is off; use the Start command")
+        return
+    }
     start()
 }
 
 def off() {
+    if (!switchControlsMicrowave) {
+        logger("warn", "off() ignored: 'Switch on/off starts and stops the microwave' is off; use the Stop command")
+        return
+    }
     stop()
 }
 
@@ -293,11 +318,6 @@ def getDeviceId() {
     return device.deviceNetworkId.replace("thinqconnect:", "")
 }
 
-def getDeviceDetails() {
-    def deviceId = getDeviceId()
-    return parent.state.foundDevices.find { it.id == deviceId }
-}
-
 private def getResourceEntry(resource) {
     if (!resource) return null
     if (resource instanceof List) {
@@ -316,17 +336,18 @@ private Integer safeToInt(value) {
     }
 }
 
+int storedTimer(String key) {
+    def v = getDataValue(key)
+    return v?.isInteger() ? v.toInteger() : 0
+}
+
 def cleanEnumValue(value) {
     if (value == null) return ""
-    
-    // Convert enum values to readable format
     return value.toString()
-        .replaceAll(/^[A-Z_]+_/, "")  // Remove prefix
-        .replaceAll(/_/, " ")         // Replace underscores with spaces
-        .toLowerCase()                // Convert to lowercase
-        .split(' ')                   // Split into words
-        .collect { it.capitalize() }  // Capitalize each word
-        .join(' ')                    // Join back together
+        .toLowerCase()
+        .split('_')
+        .collect { it.capitalize() }
+        .join(' ')
 }
 
 def convertSecondsToTime(int sec) {
