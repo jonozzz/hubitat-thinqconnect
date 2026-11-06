@@ -129,6 +129,9 @@ def mqttConnectUntilSuccessful() {
     logger("debug", "mqttConnectUntilSuccessful()")
 
     try {
+        // A retry can find a half-open connection (e.g. connect worked, subscribe failed)
+        if (interfaces.mqtt.isConnected()) interfaces.mqtt.disconnect()
+
         def mqtt = parent.retrieveMqttDetails()
 
         interfaces.mqtt.connect(mqtt.server,
@@ -139,8 +142,7 @@ def mqttConnectUntilSuccessful() {
                                 privateKey: mqtt.privateKey,
                                 caCertificate: mqtt.caCertificate,
                                 clientCertificate: mqtt.certificate,
-                                cleanSession: true,
-                                ignoreSSLIssues: true)
+                                cleanSession: true)
         pauseExecution(3000)
         for (sub in mqtt.subscriptions) {
             interfaces.mqtt.subscribe(sub)
@@ -148,10 +150,20 @@ def mqttConnectUntilSuccessful() {
         return true
     }
     catch (e) {
-        logger("warn", "Lost connection to MQTT, retrying in 15 seconds ${e}")
-        runIn(15, "mqttConnectUntilSuccessful")
+        scheduleMqttRetry("connect failed: ${e}")
         return false
     }
+}
+
+// Retry 15 s after a failure, doubling up to 10 min; a successful connection resets it.
+// A broker that accepts and then drops the connection would otherwise loop every few seconds.
+void scheduleMqttRetry(String why) {
+    int n = (state.mqttRetries ?: 0) as int
+    int delay = Math.min(15 * (1 << Math.min(n, 6)), 600)
+    state.mqttRetries = n + 1
+    // One drop usually heals on the first retry; only a run of failures is an error
+    logger(n >= 3 ? "error" : "warn", "MQTT ${why}; retrying in ${delay} s")
+    runIn(delay, "mqttConnectUntilSuccessful")
 }
 
 def parse(message) {
@@ -167,14 +179,15 @@ def mqttClientStatus(String message) {
     logger("debug", "mqttClientStatus(${message})")
 
     if (message.startsWith("Error:")) {
-        logger("error", "MQTT Error: ${message}")
-
         try {
             interfaces.mqtt.disconnect()
         }
         catch (e) {
         }
-        mqttConnectUntilSuccessful()
+        scheduleMqttRetry(message)
+    } else if (message.contains("Connection succeeded")) {
+        state.mqttRetries = 0
+        unschedule("mqttConnectUntilSuccessful")   // a retry still pending would drop this connection
     }
 }
 
@@ -182,13 +195,9 @@ def processStateData(data) {
     logger("debug", "processStateData(${data})")
     checkVersion()
 
+    // REST answers a list for some appliances and a map for others; a failed REST call hands us null.
+    if (data instanceof List) data = data ? data[0] : null
     if (!data) return
-
-    // Normalize payload – API may return a Map or a List with one Map entry
-    if (data instanceof List) {
-        if (data.isEmpty()) return
-        data = data[0]
-    }
     if (!(data instanceof Map)) return
 
     // Optional top-level operation resource
@@ -402,7 +411,11 @@ private def selectLocationEntry(resource, String locationName) {
         def entry = resource.find {
             it?.location?.locationName == locationName || it?.locationName == locationName
         }
-        return entry ?: resource[0]
+        if (entry) return entry
+        // A push carries only the changed locations: with a location configured, another
+        // location's entry is not ours. Entries without location markers are taken as they come.
+        boolean hasMarkers = resource.any { it?.location?.locationName || it?.locationName }
+        return (!getConfiguredLocation() || !hasMarkers) ? resource[0] : null
     }
 
     return (resource instanceof Map) ? resource : null
@@ -412,22 +425,13 @@ def getDeviceId() {
     return device.deviceNetworkId.replace("thinqconnect:", "")
 }
 
-def getDeviceDetails() {
-    def deviceId = getDeviceId()
-    return parent.state.foundDevices.find { it.id == deviceId }
-}
-
 def cleanEnumValue(value) {
     if (value == null) return ""
-    
-    // Convert enum values to readable format
     return value.toString()
-        .replaceAll(/^[A-Z_]+_/, "")  // Remove prefix
-        .replaceAll(/_/, " ")         // Replace underscores with spaces
-        .toLowerCase()                // Convert to lowercase
-        .split(' ')                   // Split into words
-        .collect { it.capitalize() }  // Capitalize each word
-        .join(' ')                    // Join back together
+        .toLowerCase()
+        .split('_')
+        .collect { it.capitalize() }
+        .join(' ')
 }
 
 /**

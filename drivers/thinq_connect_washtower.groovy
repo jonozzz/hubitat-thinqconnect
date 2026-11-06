@@ -133,6 +133,9 @@ def mqttConnectUntilSuccessful() {
     logger("debug", "mqttConnectUntilSuccessful()")
 
     try {
+        // A retry can find a half-open connection (e.g. connect worked, subscribe failed)
+        if (interfaces.mqtt.isConnected()) interfaces.mqtt.disconnect()
+
         def mqtt = parent.retrieveMqttDetails()
 
         interfaces.mqtt.connect(mqtt.server,
@@ -143,8 +146,7 @@ def mqttConnectUntilSuccessful() {
                                 privateKey: mqtt.privateKey,
                                 caCertificate: mqtt.caCertificate,
                                 clientCertificate: mqtt.certificate,
-                                cleanSession: true,
-                                ignoreSSLIssues: true)
+                                cleanSession: true)
         pauseExecution(3000)
         for (sub in mqtt.subscriptions) {
             interfaces.mqtt.subscribe(sub)
@@ -152,10 +154,20 @@ def mqttConnectUntilSuccessful() {
         return true
     }
     catch (e) {
-        logger("warn", "Lost connection to MQTT, retrying in 15 seconds ${e}")
-        runIn(15, "mqttConnectUntilSuccessful")
+        scheduleMqttRetry("connect failed: ${e}")
         return false
     }
+}
+
+// Retry 15 s after a failure, doubling up to 10 min; a successful connection resets it.
+// A broker that accepts and then drops the connection would otherwise loop every few seconds.
+void scheduleMqttRetry(String why) {
+    int n = (state.mqttRetries ?: 0) as int
+    int delay = Math.min(15 * (1 << Math.min(n, 6)), 600)
+    state.mqttRetries = n + 1
+    // One drop usually heals on the first retry; only a run of failures is an error
+    logger(n >= 3 ? "error" : "warn", "MQTT ${why}; retrying in ${delay} s")
+    runIn(delay, "mqttConnectUntilSuccessful")
 }
 
 def parse(message) {
@@ -171,14 +183,15 @@ def mqttClientStatus(String message) {
     logger("debug", "mqttClientStatus(${message})")
 
     if (message.startsWith("Error:")) {
-        logger("error", "MQTT Error: ${message}")
-
         try {
             interfaces.mqtt.disconnect()
         }
         catch (e) {
         }
-        mqttConnectUntilSuccessful()
+        scheduleMqttRetry(message)
+    } else if (message.contains("Connection succeeded")) {
+        state.mqttRetries = 0
+        unschedule("mqttConnectUntilSuccessful")   // a retry still pending would drop this connection
     }
 }
 
@@ -186,13 +199,9 @@ def processStateData(data) {
     logger("debug", "processStateData(${data})")
     checkVersion()
 
+    // REST answers a list for some appliances and a map for others; a failed REST call hands us null.
+    if (data instanceof List) data = data ? data[0] : null
     if (!data) return
-
-    // Normalize payload – API may return a Map or a List with one Map
-    if (data instanceof List) {
-        if (data.isEmpty()) return
-        data = data[0]
-    }
     if (!(data instanceof Map)) return
 
     def washerState = normalizeSection(data.washer)
@@ -233,7 +242,10 @@ private def normalizeSection(section) {
 private def processWasherState(data) {
     if (data.runState?.currentState) {
         def currentState = data.runState.currentState
+        def previousState = device.currentValue("washerCurrentState")
         sendEvent(name: "washerCurrentState", value: currentState)
+        // A push at a state change often carries a partial timer: pull the full state shortly after.
+        if (currentState != previousState) runIn(5, "refresh")
     }
 
     if (data.operation?.washerOperationMode) {
@@ -246,38 +258,25 @@ private def processWasherState(data) {
         sendEvent(name: "washerRemoteControlEnabled", value: remoteEnabled)
     }
 
-    if (data.timer?.remainHour != null) {
-        updateDataValue("washerRemainHour", data.timer.remainHour.toString())
-    }
-    if (data.timer?.totalHour != null) {
-        updateDataValue("washerTotalHour", data.timer.totalHour.toString())
-    }
-    if (data.timer?.totalMinute != null) {
-        updateDataValue("washerTotalMinute", data.timer.totalMinute.toString())
-    }
+    // A message carries only the timer fields that changed (often none), so keep the last value
+    // of each field and recompute only when the timer is present: a missing field is "unchanged".
+    if (data.timer) {
+        ["remainHour", "remainMinute", "totalHour", "totalMinute"].each { k ->
+            if (data.timer[k] != null) updateDataValue("washer" + k.capitalize(), data.timer[k].toString())
+        }
+        int remainingTime = storedTimer("washerRemainHour") * 3600 + storedTimer("washerRemainMinute") * 60
+        int totalTime = storedTimer("washerTotalHour") * 3600 + storedTimer("washerTotalMinute") * 60
+        int runTime = Math.max(totalTime - remainingTime, 0)
 
-    def remainHour = data.timer?.remainHour != null ? data.timer.remainHour : safeToInt(getDataValue("washerRemainHour"))
-    def remainMinute = data.timer?.remainMinute ?: 0
-    def totalHour = data.timer?.totalHour != null ? data.timer.totalHour : safeToInt(getDataValue("washerTotalHour"))
-    def totalMinute = data.timer?.totalMinute != null ? data.timer.totalMinute : safeToInt(getDataValue("washerTotalMinute"))
+        sendEvent(name: "washerRemainingTime", value: remainingTime, unit: "seconds")
+        sendEvent(name: "washerRemainingTimeDisplay", value: convertSecondsToTime(remainingTime))
+        sendEvent(name: "washerTotalTime", value: totalTime, unit: "seconds")
+        sendEvent(name: "washerTotalTimeDisplay", value: convertSecondsToTime(totalTime))
+        sendEvent(name: "washerRunTime", value: runTime, unit: "seconds")
+        sendEvent(name: "washerRunTimeDisplay", value: convertSecondsToTime(runTime))
 
-    def remainingTime = (remainHour * 3600) + (remainMinute * 60)
-    def totalTime = (totalHour * 3600) + (totalMinute * 60)
-    def runTime = totalTime - remainingTime
-
-    sendEvent(name: "washerRemainingTime", value: remainingTime, unit: "seconds")
-    sendEvent(name: "washerRemainingTimeDisplay", value: convertSecondsToTime(remainingTime))
-    sendEvent(name: "washerTotalTime", value: totalTime, unit: "seconds")
-    sendEvent(name: "washerTotalTimeDisplay", value: convertSecondsToTime(totalTime))
-    sendEvent(name: "washerRunTime", value: runTime, unit: "seconds")
-    sendEvent(name: "washerRunTimeDisplay", value: convertSecondsToTime(runTime))
-
-    Date currentTime = new Date()
-    use(groovy.time.TimeCategory) {
-        currentTime = currentTime + (remainingTime as int).seconds
+        updateFinishTime("washerFinishTimeDisplay", remainingTime, data.runState?.currentState ?: device.currentValue("washerCurrentState"))
     }
-    def finishTimeDisplay = currentTime.format("yyyy-MM-dd'T'HH:mm:ssZ", location.timeZone)
-    sendEvent(name: "washerFinishTimeDisplay", value: finishTimeDisplay)
 
     if (data.timer?.relativeHourToStart != null) {
         sendEvent(name: "washerRelativeHourToStart", value: data.timer.relativeHourToStart)
@@ -310,7 +309,10 @@ private def processWasherState(data) {
 private def processDryerState(data) {
     if (data.runState?.currentState) {
         def currentState = data.runState.currentState
+        def previousState = device.currentValue("dryerCurrentState")
         sendEvent(name: "dryerCurrentState", value: currentState)
+        // A push at a state change often carries a partial timer: pull the full state shortly after.
+        if (currentState != previousState) runIn(5, "refresh")
     }
 
     if (data.operation?.dryerOperationMode) {
@@ -323,38 +325,25 @@ private def processDryerState(data) {
         sendEvent(name: "dryerRemoteControlEnabled", value: remoteEnabled)
     }
 
-    if (data.timer?.remainHour != null) {
-        updateDataValue("dryerRemainHour", data.timer.remainHour.toString())
-    }
-    if (data.timer?.totalHour != null) {
-        updateDataValue("dryerTotalHour", data.timer.totalHour.toString())
-    }
-    if (data.timer?.totalMinute != null) {
-        updateDataValue("dryerTotalMinute", data.timer.totalMinute.toString())
-    }
+    // A message carries only the timer fields that changed (often none), so keep the last value
+    // of each field and recompute only when the timer is present: a missing field is "unchanged".
+    if (data.timer) {
+        ["remainHour", "remainMinute", "totalHour", "totalMinute"].each { k ->
+            if (data.timer[k] != null) updateDataValue("dryer" + k.capitalize(), data.timer[k].toString())
+        }
+        int remainingTime = storedTimer("dryerRemainHour") * 3600 + storedTimer("dryerRemainMinute") * 60
+        int totalTime = storedTimer("dryerTotalHour") * 3600 + storedTimer("dryerTotalMinute") * 60
+        int runTime = Math.max(totalTime - remainingTime, 0)
 
-    def remainHour = data.timer?.remainHour != null ? data.timer.remainHour : safeToInt(getDataValue("dryerRemainHour"))
-    def remainMinute = data.timer?.remainMinute ?: 0
-    def totalHour = data.timer?.totalHour != null ? data.timer.totalHour : safeToInt(getDataValue("dryerTotalHour"))
-    def totalMinute = data.timer?.totalMinute != null ? data.timer.totalMinute : safeToInt(getDataValue("dryerTotalMinute"))
+        sendEvent(name: "dryerRemainingTime", value: remainingTime, unit: "seconds")
+        sendEvent(name: "dryerRemainingTimeDisplay", value: convertSecondsToTime(remainingTime))
+        sendEvent(name: "dryerTotalTime", value: totalTime, unit: "seconds")
+        sendEvent(name: "dryerTotalTimeDisplay", value: convertSecondsToTime(totalTime))
+        sendEvent(name: "dryerRunTime", value: runTime, unit: "seconds")
+        sendEvent(name: "dryerRunTimeDisplay", value: convertSecondsToTime(runTime))
 
-    def remainingTime = (remainHour * 3600) + (remainMinute * 60)
-    def totalTime = (totalHour * 3600) + (totalMinute * 60)
-    def runTime = totalTime - remainingTime
-
-    sendEvent(name: "dryerRemainingTime", value: remainingTime, unit: "seconds")
-    sendEvent(name: "dryerRemainingTimeDisplay", value: convertSecondsToTime(remainingTime))
-    sendEvent(name: "dryerTotalTime", value: totalTime, unit: "seconds")
-    sendEvent(name: "dryerTotalTimeDisplay", value: convertSecondsToTime(totalTime))
-    sendEvent(name: "dryerRunTime", value: runTime, unit: "seconds")
-    sendEvent(name: "dryerRunTimeDisplay", value: convertSecondsToTime(runTime))
-
-    Date currentTime = new Date()
-    use(groovy.time.TimeCategory) {
-        currentTime = currentTime + (remainingTime as int).seconds
+        updateFinishTime("dryerFinishTimeDisplay", remainingTime, data.runState?.currentState ?: device.currentValue("dryerCurrentState"))
     }
-    def finishTimeDisplay = currentTime.format("yyyy-MM-dd'T'HH:mm:ssZ", location.timeZone)
-    sendEvent(name: "dryerFinishTimeDisplay", value: finishTimeDisplay)
 
     if (data.timer?.relativeHourToStart != null) {
         sendEvent(name: "dryerRelativeHourToStart", value: data.timer.relativeHourToStart)
@@ -461,29 +450,16 @@ def getDeviceId() {
     return device.deviceNetworkId.replace("thinqconnect:", "")
 }
 
-def getDeviceDetails() {
-    def deviceId = getDeviceId()
-    return parent.state.foundDevices.find { it.id == deviceId }
-}
-
-private Integer safeToInt(value) {
-    if (value == null) return 0
-    try {
-        return value.toString().toInteger()
-    }
-    catch (e) {
-        return 0
-    }
+int storedTimer(String key) {
+    def v = getDataValue(key)
+    return v?.isInteger() ? v.toInteger() : 0
 }
 
 def cleanEnumValue(value) {
     if (value == null) return ""
-
     return value.toString()
-        .replaceAll(/^[A-Z_]+_/, "")
-        .replaceAll(/_/, " ")
         .toLowerCase()
-        .split(' ')
+        .split('_')
         .collect { it.capitalize() }
         .join(' ')
 }
@@ -512,4 +488,24 @@ private logger(level, msg) {
             log."${level}" "${device.displayName} ${msg}"
         }
     }
+}
+
+// finishTime = now + remaining, so every message moves it by a few seconds and each refresh of an
+// idle appliance logged a new "now". Send it only while a cycle runs (an idle appliance can keep a
+// stale remaining minute), and only when it moves by more than 90 s; it keeps the last cycle's time.
+private void updateFinishTime(String attr, int remainingTime, runState) {
+    if (remainingTime <= 0 || !isRunningState(runState)) return
+    long finish = now() + remainingTime * 1000L
+    String current = device.currentValue(attr)
+    if (current) {
+        try {
+            if (Math.abs(finish - Date.parse("yyyy-MM-dd'T'HH:mm:ssZ", current).time) < 90000L) return
+        } catch (Exception ignored) { }   // an unparseable old value is replaced
+    }
+    sendEvent(name: attr, value: new Date(finish).format("yyyy-MM-dd'T'HH:mm:ssZ", location.timeZone))
+}
+
+// Powered on but idle, paused, finished, waiting for a delayed start or in error: not running.
+boolean isRunningState(state) {
+    return state != null && !(state.toString() ==~ /(?i)(power_off|initial|pause|end|error|reserved|sleep)/)
 }
